@@ -1,0 +1,42 @@
+// @see - https://www.electron.build/configuration/configuration
+{
+  $schema: "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+
+  appId: "com.mao.vaultofguilds",
+  asar: true,
+  productName: "Vault of Guilds",
+
+  directories: {
+    output: "release/${version}",
+  },
+
+  files: ["dist/**", "dist-electron/**", "package.json"],
+
+  win: {
+    target: [
+      {
+        target: "nsis",
+        arch: ["x64"],
+      },
+    ],
+    icon: "public/assets/icon.png",
+    artifactName: "Vault-of-Guilds-Windows-${version}-Setup.${ext}",
+  },
+
+  nsis: {
+    oneClick: false,
+    perMachine: false,
+    allowToChangeInstallationDirectory: true,
+    deleteAppDataOnUninstall: false,
+  },
+
+  mac: {
+    target: ["dmg"],
+    artifactName: "Vault-of-Guilds-Mac-${version}-Installer.${ext}",
+  },
+
+  linux: {
+    target: ["AppImage"],
+    artifactName: "Vault-of-Guilds-Linux-${version}.${ext}",
+  },
+}
