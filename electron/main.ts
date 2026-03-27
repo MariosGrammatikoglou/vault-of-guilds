@@ -1,4 +1,5 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
+import { autoUpdater } from "electron-updater";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -33,10 +34,7 @@ function createWindow() {
     title: "Vault of Guilds",
     titleBarStyle: "hiddenInset",
     autoHideMenuBar: true,
-
-    // 👉 ΕΝΑ icon για όλα
     icon: iconPath,
-
     webPreferences: {
       preload: path.join(__dirname, "preload.mjs"),
     },
@@ -56,9 +54,58 @@ function createWindow() {
   }
 }
 
+function setupAutoUpdates() {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("checking-for-update", () => {
+    console.log("Checking for updates...");
+  });
+
+  autoUpdater.on("update-available", (info) => {
+    console.log("Update available:", info.version);
+  });
+
+  autoUpdater.on("update-not-available", (info) => {
+    console.log("No update available:", info.version);
+  });
+
+  autoUpdater.on("error", (err) => {
+    console.error("Auto update error:", err);
+  });
+
+  autoUpdater.on("download-progress", (progress) => {
+    console.log(`Downloading update: ${Math.round(progress.percent)}%`);
+  });
+
+  autoUpdater.on("update-downloaded", (info) => {
+    const result = dialog.showMessageBoxSync({
+      type: "info",
+      buttons: ["Restart now", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+      title: "Update ready",
+      message: `Version ${info.version} has been downloaded.`,
+      detail: "Restart the app to apply the update.",
+    });
+
+    if (result === 0) {
+      autoUpdater.quitAndInstall();
+    }
+  });
+
+  if (!app.isPackaged) {
+    console.log("Skipping auto-update in development mode.");
+    return;
+  }
+
+  void autoUpdater.checkForUpdatesAndNotify();
+}
+
 app.whenReady().then(() => {
   app.setName("Vault of Guilds");
   createWindow();
+  setupAutoUpdates();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
