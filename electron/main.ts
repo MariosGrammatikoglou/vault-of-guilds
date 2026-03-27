@@ -15,7 +15,9 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   ? path.join(process.env.APP_ROOT, "public")
   : RENDERER_DIST;
 
-let win: BrowserWindow | null;
+let win: BrowserWindow | null = null;
+let updateCheckInterval: NodeJS.Timeout | null = null;
+let isCheckingForUpdates = false;
 
 function createWindow() {
   const iconPath = path.join(
@@ -54,9 +56,33 @@ function createWindow() {
   }
 }
 
+function checkForUpdates() {
+  if (!app.isPackaged) {
+    console.log("Skipping auto-update in development mode.");
+    return;
+  }
+
+  if (isCheckingForUpdates) {
+    return;
+  }
+
+  isCheckingForUpdates = true;
+  console.log("Checking for updates...");
+
+  void autoUpdater.checkForUpdates().finally(() => {
+    isCheckingForUpdates = false;
+  });
+}
+
 function setupAutoUpdates() {
+  if (!app.isPackaged) {
+    console.log("Skipping auto-update setup in development mode.");
+    return;
+  }
+
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = false;
 
   autoUpdater.on("checking-for-update", () => {
     console.log("Checking for updates...");
@@ -64,14 +90,17 @@ function setupAutoUpdates() {
 
   autoUpdater.on("update-available", (info) => {
     console.log("Update available:", info.version);
+
+    void dialog.showMessageBox({
+      type: "info",
+      title: "Update available",
+      message: `A new version (${info.version}) is available.`,
+      detail: "The update is being downloaded in the background.",
+    });
   });
 
   autoUpdater.on("update-not-available", (info) => {
     console.log("No update available:", info.version);
-  });
-
-  autoUpdater.on("error", (err) => {
-    console.error("Auto update error:", err);
   });
 
   autoUpdater.on("download-progress", (progress) => {
@@ -79,6 +108,8 @@ function setupAutoUpdates() {
   });
 
   autoUpdater.on("update-downloaded", (info) => {
+    console.log("Update downloaded:", info.version);
+
     const result = dialog.showMessageBoxSync({
       type: "info",
       buttons: ["Restart now", "Later"],
@@ -94,12 +125,29 @@ function setupAutoUpdates() {
     }
   });
 
-  if (!app.isPackaged) {
-    console.log("Skipping auto-update in development mode.");
-    return;
-  }
+  autoUpdater.on("error", (err) => {
+    console.error("Auto update error:", err);
 
-  void autoUpdater.checkForUpdatesAndNotify();
+    void dialog.showMessageBox({
+      type: "error",
+      title: "Update error",
+      message: "There was a problem checking for updates.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  });
+
+  // first check a few seconds after app starts
+  setTimeout(() => {
+    checkForUpdates();
+  }, 3000);
+
+  // check again every 30 minutes while app stays open
+  updateCheckInterval = setInterval(
+    () => {
+      checkForUpdates();
+    },
+    30 * 60 * 1000,
+  );
 }
 
 app.whenReady().then(() => {
@@ -115,6 +163,11 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  if (updateCheckInterval) {
+    clearInterval(updateCheckInterval);
+    updateCheckInterval = null;
+  }
+
   if (process.platform !== "darwin") {
     app.quit();
     win = null;
