@@ -57,6 +57,7 @@ const POLL_MS = 2000;
 const PAGE_SIZE = 20;
 const TOP_LOAD_THRESHOLD_PX = 80;
 const BOTTOM_STICK_THRESHOLD_PX = 120;
+const SELECTED_SERVER_STORAGE_KEY = "selectedServerId";
 
 const PERMS = {
   MANAGE_ROLES: 1 << 0,
@@ -94,10 +95,6 @@ export default function App() {
     return u ? (JSON.parse(u) as User) : null;
   });
 
-  useEffect(() => {
-    setAuth(token);
-  }, [token]);
-
   const handleUserUpdate = (u: User) => {
     setUser(u);
     localStorage.setItem("user", JSON.stringify(u));
@@ -120,7 +117,9 @@ export default function App() {
       token={token}
       user={user}
       onLogout={() => {
-        localStorage.clear();
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        localStorage.removeItem(SELECTED_SERVER_STORAGE_KEY);
         location.reload();
       }}
     />
@@ -186,6 +185,14 @@ function MainView({
   useEffect(() => {
     channelIdRef.current = channelId;
   }, [channelId]);
+
+  useEffect(() => {
+    if (serverId) {
+      localStorage.setItem(SELECTED_SERVER_STORAGE_KEY, serverId);
+    } else {
+      localStorage.removeItem(SELECTED_SERVER_STORAGE_KEY);
+    }
+  }, [serverId]);
 
   const currentServer = servers.find((s) => s.id === serverId) || null;
   const isOwner = currentServer?.owner_id === user.id;
@@ -306,6 +313,8 @@ function MainView({
   }
 
   useEffect(() => {
+    setAuth(token);
+
     const s = connectSocket(token);
 
     s.on("connected", () => console.log("ws connected"));
@@ -372,10 +381,47 @@ function MainView({
   }, [token, seenIds]);
 
   useEffect(() => {
-    myServers()
-      .then(setServers)
-      .catch((e) => console.error("servers/mine failed", e));
-  }, []);
+    let cancelled = false;
+
+    async function boot() {
+      try {
+        setAuth(token);
+
+        const list = await myServers();
+        if (cancelled) return;
+
+        setServers(list);
+
+        if (list.length === 0) {
+          setServerId(null);
+          setChannels([]);
+          setChannelId(null);
+          setMessages([]);
+          setMembers([]);
+          setRoles([]);
+          setMemberRoles({});
+          return;
+        }
+
+        const savedServerId = localStorage.getItem(SELECTED_SERVER_STORAGE_KEY);
+        const preferredServerId =
+          savedServerId && list.some((s) => s.id === savedServerId)
+            ? savedServerId
+            : list[0].id;
+
+        await selectServer(preferredServerId);
+      } catch (e) {
+        console.error("servers boot failed", e);
+        setServers([]);
+      }
+    }
+
+    void boot();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   async function refreshInvite(id: string | null) {
     if (!id) {
@@ -458,6 +504,7 @@ function MainView({
 
   async function selectServer(id: string) {
     setServerId(id);
+    localStorage.setItem(SELECTED_SERVER_STORAGE_KEY, id);
 
     await Promise.all([
       refreshInvite(id),
@@ -558,6 +605,7 @@ function MainView({
       const all = await listChannels(s.id);
       setChannels(all);
       setServerId(s.id);
+      localStorage.setItem(SELECTED_SERVER_STORAGE_KEY, s.id);
 
       await selectChannel(ch.id);
     } catch (e) {
