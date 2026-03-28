@@ -221,7 +221,7 @@ export default function ServerRail({
       <div
         className={`${glass} ${panelRound} px-5 py-2 sm:py-2.5 overflow-x-auto overflow-y-hidden ${cuteScroll}`}
       >
-        <div className="text-[10px] text-white/50 mb-2">
+        <div className="text-[11px] text-white/70 mb-2">
           servers count: {servers.length}
         </div>
 
@@ -249,7 +249,6 @@ export default function ServerRail({
                     src={imgSrc}
                     alt={s.name}
                     onError={(e) => {
-                      console.warn("SERVER ICON FAILED:", s.name, imgSrc);
                       (e.currentTarget as HTMLImageElement).src =
                         defaultServerIcon;
                     }}

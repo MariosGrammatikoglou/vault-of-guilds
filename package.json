@@ -2,7 +2,7 @@
   "name": "vault-of-guilds",
   "productName": "Vault of Guilds",
   "private": true,
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Vault of Guilds desktop app",
   "author": "Mao",
   "type": "module",

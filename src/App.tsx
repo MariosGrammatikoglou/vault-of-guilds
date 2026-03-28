@@ -171,6 +171,12 @@ function MainView({
     "text" | "voice" | null
   >(null);
 
+  const [debugLines, setDebugLines] = useState<string[]>([]);
+
+  const appendDebug = (line: string) => {
+    setDebugLines((prev) => [...prev.slice(-7), line]);
+  };
+
   const seenIds = useMemo(() => new Set<string>(), []);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -195,8 +201,8 @@ function MainView({
   }, [serverId]);
 
   useEffect(() => {
-    console.log("STATE servers:", servers);
-  }, [servers]);
+    appendDebug(`STATE servers length: ${servers.length}`);
+  }, [servers.length]);
 
   const currentServer = servers.find((s) => s.id === serverId) || null;
   const isOwner = currentServer?.owner_id === user.id;
@@ -251,6 +257,7 @@ function MainView({
       setShouldSnapToBottom(true);
     } catch (e) {
       console.error("initial messages fetch failed", e);
+      appendDebug("initial messages fetch failed");
       if (channelIdRef.current === targetChannelId) {
         setMessages([]);
         setHasMoreMessages(false);
@@ -309,6 +316,7 @@ function MainView({
       });
     } catch (e) {
       console.error("older messages fetch failed", e);
+      appendDebug("older messages fetch failed");
     } finally {
       if (channelIdRef.current === currentChannelId) {
         setLoadingOlder(false);
@@ -318,10 +326,14 @@ function MainView({
 
   useEffect(() => {
     setAuth(token);
+    appendDebug(`socket init with token: ${token ? "yes" : "no"}`);
 
     const s = connectSocket(token);
 
-    s.on("connected", () => console.log("ws connected"));
+    s.on("connected", () => {
+      console.log("ws connected");
+      appendDebug("ws connected");
+    });
 
     s.on("connect_error", (e: unknown) => {
       const msg =
@@ -331,9 +343,13 @@ function MainView({
             ? e
             : JSON.stringify(e);
       console.warn("ws error", msg);
+      appendDebug(`ws error: ${msg}`);
     });
 
-    s.on("reconnect", () => console.log("ws reconnected"));
+    s.on("reconnect", () => {
+      console.log("ws reconnected");
+      appendDebug("ws reconnected");
+    });
 
     s.on("presence:update", (p: { serverId: string; online: string[] }) => {
       if (!serverIdRef.current || p.serverId !== serverIdRef.current) return;
@@ -391,11 +407,16 @@ function MainView({
       try {
         setAuth(token);
 
-        console.log("BOOT token:", token);
-        console.log("BOOT user:", user);
+        appendDebug(`BOOT token exists: ${token ? "yes" : "no"}`);
+        appendDebug(`BOOT user: ${user.username} (${user.id})`);
 
         const list = await myServers();
-        console.log("BOOT myServers result:", list);
+        appendDebug(`BOOT myServers result length: ${list.length}`);
+        appendDebug(
+          `BOOT myServers names: ${
+            list.map((s) => s.name).join(", ") || "(none)"
+          }`,
+        );
 
         if (cancelled) return;
 
@@ -418,9 +439,11 @@ function MainView({
             ? savedServerId
             : list[0].id;
 
+        appendDebug(`BOOT selected server id: ${preferredServerId}`);
         await selectServer(preferredServerId);
       } catch (e) {
         console.error("servers boot failed", e);
+        appendDebug(`servers boot failed: ${String(e)}`);
         setServers([]);
       }
     }
@@ -505,6 +528,7 @@ function MainView({
       );
     } catch (e) {
       console.warn("members/roles fetch failed", e);
+      appendDebug("members/roles fetch failed");
       setMembers([]);
       setRoles([]);
       setMemberRoles({});
@@ -584,6 +608,7 @@ function MainView({
       scrollToBottom("smooth");
     } catch (e) {
       console.error("send failed", e);
+      appendDebug("send failed");
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       setInputVal(content);
     }
@@ -619,6 +644,7 @@ function MainView({
       await selectChannel(ch.id);
     } catch (e) {
       console.error("create server failed", e);
+      appendDebug("create server failed");
     }
   }
 
@@ -635,6 +661,7 @@ function MainView({
         "Only the server owner or members with Manage Channels can create channels.",
       );
       console.warn("create channel failed", e);
+      appendDebug("create channel failed");
     }
   }
 
@@ -649,6 +676,7 @@ function MainView({
       await selectServer(joinedId);
     } catch (e) {
       console.warn("join by code failed", e);
+      appendDebug("join by code failed");
       alert("Invalid or expired invite code.");
     }
   }
@@ -661,6 +689,7 @@ function MainView({
       force((x) => x + 1);
     } catch (e) {
       console.error("join voice failed", e);
+      appendDebug("join voice failed");
     }
   }
 
@@ -672,6 +701,7 @@ function MainView({
       force((x) => x + 1);
     } catch (e) {
       console.error("leave voice failed", e);
+      appendDebug("leave voice failed");
     }
   }
 
@@ -843,6 +873,13 @@ function MainView({
           iconBustMap={iconBust}
           tempIconOverride={tempIconOverride}
         />
+
+        <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-white/70 space-y-1">
+          <div>DEBUG PANEL</div>
+          {debugLines.map((line, i) => (
+            <div key={`${line}-${i}`}>{line}</div>
+          ))}
+        </div>
 
         {hasServerSelected ? (
           <main className="flex-1 min-h-0 grid grid-cols-[280px_minmax(0,2fr)_260px] gap-3 sm:gap-4">
