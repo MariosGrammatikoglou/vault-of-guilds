@@ -194,6 +194,10 @@ function MainView({
     }
   }, [serverId]);
 
+  useEffect(() => {
+    console.log("STATE servers:", servers);
+  }, [servers]);
+
   const currentServer = servers.find((s) => s.id === serverId) || null;
   const isOwner = currentServer?.owner_id === user.id;
   const canManageRoles = isOwner || (myPermMask & PERMS.MANAGE_ROLES) !== 0;
@@ -387,7 +391,12 @@ function MainView({
       try {
         setAuth(token);
 
+        console.log("BOOT token:", token);
+        console.log("BOOT user:", user);
+
         const list = await myServers();
+        console.log("BOOT myServers result:", list);
+
         if (cancelled) return;
 
         setServers(list);
@@ -421,7 +430,7 @@ function MainView({
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, user]);
 
   async function refreshInvite(id: string | null) {
     if (!id) {
