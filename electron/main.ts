@@ -66,32 +66,14 @@ function setupAutoUpdates() {
 
   autoUpdater.on("checking-for-update", () => {
     console.log("Checking for updates...");
-    void dialog.showMessageBox({
-      type: "info",
-      title: "Updater",
-      message: "Checking for updates...",
-      detail: `Current version: ${app.getVersion()}`,
-    });
   });
 
   autoUpdater.on("update-available", (info) => {
     console.log("Update available:", info.version);
-    void dialog.showMessageBox({
-      type: "info",
-      title: "Updater",
-      message: `Update available: ${info.version}`,
-      detail: `Current version: ${app.getVersion()}\nDownloading in background.`,
-    });
   });
 
   autoUpdater.on("update-not-available", (info) => {
     console.log("No update available:", info.version);
-    void dialog.showMessageBox({
-      type: "info",
-      title: "Updater",
-      message: "No update available.",
-      detail: `Current version: ${app.getVersion()}\nLatest seen version: ${info.version}`,
-    });
   });
 
   autoUpdater.on("download-progress", (progress) => {
@@ -118,14 +100,17 @@ function setupAutoUpdates() {
       defaultId: 0,
       cancelId: 1,
       title: "Update ready",
-      message: `Version ${info.version} has been downloaded.`,
-      detail: "Restart the app to apply the update.",
+      message: `Version ${info.version} is ready to install.`,
+      detail: "Restart Vault of Guilds to finish updating.",
+      noLink: true,
     });
 
     if (result === 0) {
       isInstallingUpdate = true;
+
       setImmediate(() => {
-        autoUpdater.quitAndInstall(false, true);
+        // Silent install + reopen app after update
+        autoUpdater.quitAndInstall(true, true);
       });
     }
   });
@@ -142,7 +127,7 @@ function setupAutoUpdates() {
 
     void dialog.showMessageBox({
       type: "error",
-      title: "Updater error",
+      title: "Update error",
       message: "There was a problem checking for updates.",
       detail: err instanceof Error ? err.message : String(err),
     });
