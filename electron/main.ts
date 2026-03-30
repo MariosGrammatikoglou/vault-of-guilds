@@ -20,10 +20,10 @@ let hasShownUpdaterError = false;
 let isInstallingUpdate = false;
 
 function createWindow() {
-  const winIconPath =
+  const windowIconPath =
     process.platform === "win32"
-      ? path.join(process.env.APP_ROOT!, "public", "assets", "icon.png")
-      : path.join(process.env.APP_ROOT!, "public", "assets", "icon.ico");
+      ? path.join(process.env.APP_ROOT!, "public", "assets", "icon.ico")
+      : path.join(process.env.APP_ROOT!, "public", "assets", "icon.png");
 
   win = new BrowserWindow({
     width: 1200,
@@ -34,7 +34,7 @@ function createWindow() {
     title: "Vault of Guilds",
     titleBarStyle: "hiddenInset",
     autoHideMenuBar: true,
-    icon: winIconPath,
+    icon: windowIconPath,
     webPreferences: {
       preload: path.join(__dirname, "preload.mjs"),
     },
@@ -69,7 +69,7 @@ function setupAutoUpdates() {
     void dialog.showMessageBox({
       type: "info",
       title: "Updater",
-      message: `Checking for updates...`,
+      message: "Checking for updates...",
       detail: `Current version: ${app.getVersion()}`,
     });
   });

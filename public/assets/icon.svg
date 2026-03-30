@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <clipPath id="clip">
+      <circle cx="512" cy="512" r="360"></circle>
+    </clipPath>
+  </defs>
+
+  <!-- White inside circle -->
+  <circle cx="512" cy="512" r="360" fill="#ffffff"></circle>
+
+  <!-- Clipped content -->
+  <g clip-path="url(#clip)">
+    
+    <!-- Head -->
+    <circle cx="512" cy="520" r="230" fill="#E8D8C3" stroke="#111111" stroke-width="14"></circle>
+
+    <!-- Eyes -->
+    <circle cx="420" cy="500" r="20" fill="#111111"></circle>
+    <circle cx="604" cy="500" r="20" fill="#111111"></circle>
+
+    <!-- Mouth -->
+    <rect x="440" y="580" width="144" height="12" rx="6" fill="#111111"></rect>
+
+    <!-- Stick body (FIXED) -->
+    <!-- head bottom = 520 + 230 = 750 -->
+    <!-- start a bit below (760), end before border (~860 < 872 limit) -->
+    <line x1="512" y1="760" x2="512" y2="860" stroke="#111111" stroke-width="18" stroke-linecap="round"></line>
+    
+  </g>
+
+  <!-- Border -->
+  <circle cx="512" cy="512" r="360" fill="none" stroke="#111111" stroke-width="28"></circle>
+</svg>
