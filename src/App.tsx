@@ -885,6 +885,9 @@ function MainView({
                 togglePushToTalk={togglePushToTalk}
                 pushToTalkLabel={voice.pushToTalkLabel}
                 currentUserId={user.id}
+                canDisconnectVoiceMembers={
+                  isOwner || (myPermMask & PERMS.KICK_MEMBERS) !== 0
+                }
               />
             </div>
 

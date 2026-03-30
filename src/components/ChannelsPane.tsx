@@ -36,6 +36,7 @@ type Props = {
   pushToTalkLabel: string;
 
   currentUserId: string;
+  canDisconnectVoiceMembers: boolean;
 };
 
 function internalToUi(value: number) {
@@ -81,6 +82,7 @@ export default function ChannelsPane({
   togglePushToTalk,
   pushToTalkLabel,
   currentUserId,
+  canDisconnectVoiceMembers,
 }: Props) {
   const text = channels.filter((c) => c.type === "text");
   const voice = channels.filter((c) => c.type === "voice");
@@ -349,7 +351,7 @@ export default function ChannelsPane({
           getDotClass={getDotClass}
           getStatusText={getStatusText}
           onRequestDisconnect={
-            popupMember.userId === currentUserId
+            !canDisconnectVoiceMembers || popupMember.userId === currentUserId
               ? undefined
               : () => setDisconnectTarget(popupMember)
           }
