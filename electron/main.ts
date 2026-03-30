@@ -155,6 +155,8 @@ function setupAutoUpdates() {
 
 app.whenReady().then(() => {
   app.setName("Vault of Guilds");
+  app.setAppUserModelId("com.mao.vaultofguilds");
+
   createWindow();
   setupAutoUpdates();
 
