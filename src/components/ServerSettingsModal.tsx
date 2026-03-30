@@ -3,6 +3,7 @@ import type { Role, Member } from "../lib/api";
 import { CONFIG } from "../lib/config";
 import { btnPrimary, cuteScroll } from "../ui";
 import { deleteServer as deleteServerApi } from "../lib/api";
+import defaultServerIcon from "/assets/default-server.png";
 
 const PERMS = {
   MANAGE_ROLES: 1 << 0,
@@ -65,6 +66,35 @@ type Props = {
   onUploadIcon: (file: File) => Promise<void>;
 };
 
+function normalizeServerIconUrl(
+  iconUrl?: string | null,
+  bust?: number,
+): string {
+  let url: string;
+
+  if (!iconUrl) {
+    url = defaultServerIcon;
+  } else if (/^https?:\/\//i.test(iconUrl)) {
+    url = iconUrl;
+  } else {
+    const base = CONFIG.API_BASE ?? "";
+    if (!base) {
+      url = iconUrl.startsWith("/") ? iconUrl : `/${iconUrl}`;
+    } else {
+      const normalizedBase = base.endsWith("/") ? base.slice(0, -1) : base;
+      const normalizedPath = iconUrl.startsWith("/") ? iconUrl : `/${iconUrl}`;
+      url = `${normalizedBase}${normalizedPath}`;
+    }
+  }
+
+  if (bust) {
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}v=${bust}`;
+  }
+
+  return url;
+}
+
 export default function ServerSettingsModal({
   open,
   onClose,
@@ -98,9 +128,7 @@ export default function ServerSettingsModal({
 
   if (!open) return null;
 
-  const iconSrc = serverIconUrl
-    ? `${CONFIG.API_BASE}${serverIconUrl}`
-    : "/assets/default-server.png";
+  const iconSrc = normalizeServerIconUrl(serverIconUrl);
 
   async function handleDeleteServer() {
     setDeleteBusy(true);
@@ -135,7 +163,15 @@ export default function ServerSettingsModal({
               <div className="flex items-center gap-3 mb-4">
                 <img
                   src={iconSrc}
-                  className="w-10 h-10 rounded-xl object-cover ring-1 ring-black/30"
+                  alt=""
+                  draggable={false}
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    if (target.src !== defaultServerIcon) {
+                      target.src = defaultServerIcon;
+                    }
+                  }}
+                  className="block w-10 h-10 rounded-xl object-cover ring-1 ring-black/30 bg-[#161b2b] select-none"
                 />
                 <div className="min-w-0">
                   <h2 className="text-[13px] uppercase tracking-wide text-slate-400">
@@ -296,8 +332,15 @@ function Overview({
       <div className="rounded-xl border border-[#20253a] bg-[#111727] p-5 flex items-center gap-5">
         <img
           src={preview || iconSrc}
-          className="w-20 h-20 rounded-2xl object-cover ring-1 ring-black/30"
-          alt="server icon"
+          alt=""
+          draggable={false}
+          onError={(e) => {
+            const target = e.currentTarget;
+            if (target.src !== defaultServerIcon) {
+              target.src = defaultServerIcon;
+            }
+          }}
+          className="block w-20 h-20 rounded-2xl object-cover ring-1 ring-black/30 bg-[#161b2b] select-none"
         />
         <div className="flex-1 min-w-0">
           <div className="text-[12px] text-slate-400">Server</div>

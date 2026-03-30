@@ -159,20 +159,24 @@ function CreateSvg({ className = "w-[26px] h-[26px]" }: SvgIconProps) {
   );
 }
 
-function resolveIconUrl(icon_url?: string | null, bust?: number) {
+function normalizeServerIconUrl(
+  iconUrl?: string | null,
+  bust?: number,
+): string {
   let url: string;
 
-  if (!icon_url) {
+  if (!iconUrl) {
     url = defaultServerIcon;
-  } else if (/^https?:\/\//i.test(icon_url)) {
-    url = icon_url;
+  } else if (/^https?:\/\//i.test(iconUrl)) {
+    url = iconUrl;
   } else {
-    const base = (CONFIG as { API_BASE?: string })?.API_BASE ?? "";
+    const base = CONFIG.API_BASE ?? "";
     if (!base) {
-      url = icon_url.startsWith("/") ? icon_url : `/${icon_url}`;
+      url = iconUrl.startsWith("/") ? iconUrl : `/${iconUrl}`;
     } else {
-      const needsSlash = !base.endsWith("/") && !icon_url.startsWith("/");
-      url = needsSlash ? `${base}/${icon_url}` : `${base}${icon_url}`;
+      const normalizedBase = base.endsWith("/") ? base.slice(0, -1) : base;
+      const normalizedPath = iconUrl.startsWith("/") ? iconUrl : `/${iconUrl}`;
+      url = `${normalizedBase}${normalizedPath}`;
     }
   }
 
@@ -221,15 +225,11 @@ export default function ServerRail({
       <div
         className={`${glass} ${panelRound} px-5 py-2 sm:py-2.5 overflow-x-auto overflow-y-hidden ${cuteScroll}`}
       >
-        <div className="text-[11px] text-white/70 mb-2">
-          servers count: {servers.length}
-        </div>
-
         <ul className="flex items-center gap-3 py-0.5">
           {servers.map((s) => {
             const bust = iconBustMap[s.id];
             const override = tempIconOverride[s.id];
-            const imgSrc = override ?? resolveIconUrl(s.icon_url, bust);
+            const imgSrc = override ?? normalizeServerIconUrl(s.icon_url, bust);
             const selected = serverId === s.id;
 
             return (
@@ -237,22 +237,25 @@ export default function ServerRail({
                 <button
                   onClick={() => onSelectServer(s.id)}
                   className={[
-                    "relative w-10 h-10 sm:w-11 sm:h-11 rounded-2xl overflow-hidden transition-all focus:outline-none",
+                    "relative w-10 h-10 sm:w-11 sm:h-11 rounded-2xl overflow-hidden transition-all focus:outline-none bg-[#202336]",
                     selected
                       ? "border border-slate-100/50 bg-[#262b3f] scale-105"
-                      : "border border-transparent bg-[#202336] hover:bg-[#262b3f]",
+                      : "border border-transparent hover:bg-[#262b3f]",
                   ].join(" ")}
                   title={s.name}
                   type="button"
                 >
                   <img
                     src={imgSrc}
-                    alt={s.name}
+                    alt=""
+                    draggable={false}
                     onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).src =
-                        defaultServerIcon;
+                      const target = e.currentTarget;
+                      if (target.src !== defaultServerIcon) {
+                        target.src = defaultServerIcon;
+                      }
                     }}
-                    className="w-full h-full object-cover"
+                    className="block w-full h-full object-cover select-none"
                   />
                 </button>
               </li>

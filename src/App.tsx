@@ -70,20 +70,52 @@ const PERMS = {
 const makeKey = (m: Pick<Message, "channel_id" | "user_id" | "content">) =>
   `${m.channel_id}|${m.user_id}|${m.content}`;
 
-function sortMessagesChronologically(items: Message[]) {
-  return [...items].sort(
-    (a, b) =>
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-  );
+function sortFetchedMessagesAscending(items: Message[]) {
+  return [...items].sort((a, b) => {
+    const ta = new Date(a.created_at).getTime();
+    const tb = new Date(b.created_at).getTime();
+    if (ta !== tb) return ta - tb;
+    return a.id.localeCompare(b.id);
+  });
 }
 
-function mergeUniqueMessages(existing: Message[], incoming: Message[]) {
-  const byId = new Map<string, Message>();
+function prependOlderUnique(existing: Message[], older: Message[]) {
+  const existingIds = new Set(existing.map((m) => m.id));
+  const filteredOlder = older.filter((m) => !existingIds.has(m.id));
+  return [...filteredOlder, ...existing];
+}
 
-  for (const m of existing) byId.set(m.id, m);
-  for (const m of incoming) byId.set(m.id, m);
+function appendOptimistic(existing: Message[], optimistic: Message[]) {
+  return [...existing, ...optimistic];
+}
 
-  return sortMessagesChronologically(Array.from(byId.values()));
+function appendOrReplaceLiveMessage(existing: Message[], incoming: Message) {
+  if (existing.some((m) => m.id === incoming.id)) {
+    return existing;
+  }
+
+  const incomingKey = makeKey(incoming);
+  const tempIndex = existing.findIndex(
+    (m) => m.id.startsWith("temp-") && makeKey(m) === incomingKey,
+  );
+
+  if (tempIndex !== -1) {
+    const next = [...existing];
+    next[tempIndex] = incoming;
+    return next;
+  }
+
+  return [...existing, incoming];
+}
+
+function appendFetchedLatest(existing: Message[], fetched: Message[]) {
+  let next = [...existing];
+
+  for (const msg of fetched) {
+    next = appendOrReplaceLiveMessage(next, msg);
+  }
+
+  return next;
 }
 
 export default function App() {
@@ -171,12 +203,6 @@ function MainView({
     "text" | "voice" | null
   >(null);
 
-  const [debugLines, setDebugLines] = useState<string[]>([]);
-
-  const appendDebug = (line: string) => {
-    setDebugLines((prev) => [...prev.slice(-7), line]);
-  };
-
   const seenIds = useMemo(() => new Set<string>(), []);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -199,10 +225,6 @@ function MainView({
       localStorage.removeItem(SELECTED_SERVER_STORAGE_KEY);
     }
   }, [serverId]);
-
-  useEffect(() => {
-    appendDebug(`STATE servers length: ${servers.length}`);
-  }, [servers.length]);
 
   const currentServer = servers.find((s) => s.id === serverId) || null;
   const isOwner = currentServer?.owner_id === user.id;
@@ -244,7 +266,9 @@ function MainView({
     setHasMoreMessages(true);
 
     try {
-      const msgs = await listMessages(targetChannelId, { limit: PAGE_SIZE });
+      const msgs = sortFetchedMessagesAscending(
+        await listMessages(targetChannelId, { limit: PAGE_SIZE }),
+      );
 
       if (channelIdRef.current !== targetChannelId) return;
 
@@ -257,7 +281,6 @@ function MainView({
       setShouldSnapToBottom(true);
     } catch (e) {
       console.error("initial messages fetch failed", e);
-      appendDebug("initial messages fetch failed");
       if (channelIdRef.current === targetChannelId) {
         setMessages([]);
         setHasMoreMessages(false);
@@ -290,10 +313,12 @@ function MainView({
     setLoadingOlder(true);
 
     try {
-      const older = await listMessages(currentChannelId, {
-        before: oldest.id,
-        limit: PAGE_SIZE,
-      });
+      const older = sortFetchedMessagesAscending(
+        await listMessages(currentChannelId, {
+          before: oldest.id,
+          limit: PAGE_SIZE,
+        }),
+      );
 
       if (channelIdRef.current !== currentChannelId) return;
 
@@ -305,7 +330,7 @@ function MainView({
       older.forEach((m) => seenIds.add(m.id));
       setHasMoreMessages(older.length === PAGE_SIZE);
 
-      setMessages((prev) => mergeUniqueMessages(older, prev));
+      setMessages((prev) => prependOlderUnique(prev, older));
 
       requestAnimationFrame(() => {
         const el = messagesContainerRef.current;
@@ -316,7 +341,6 @@ function MainView({
       });
     } catch (e) {
       console.error("older messages fetch failed", e);
-      appendDebug("older messages fetch failed");
     } finally {
       if (channelIdRef.current === currentChannelId) {
         setLoadingOlder(false);
@@ -326,14 +350,10 @@ function MainView({
 
   useEffect(() => {
     setAuth(token);
-    appendDebug(`socket init with token: ${token ? "yes" : "no"}`);
 
     const s = connectSocket(token);
 
-    s.on("connected", () => {
-      console.log("ws connected");
-      appendDebug("ws connected");
-    });
+    s.on("connected", () => console.log("ws connected"));
 
     s.on("connect_error", (e: unknown) => {
       const msg =
@@ -343,13 +363,9 @@ function MainView({
             ? e
             : JSON.stringify(e);
       console.warn("ws error", msg);
-      appendDebug(`ws error: ${msg}`);
     });
 
-    s.on("reconnect", () => {
-      console.log("ws reconnected");
-      appendDebug("ws reconnected");
-    });
+    s.on("reconnect", () => console.log("ws reconnected"));
 
     s.on("presence:update", (p: { serverId: string; online: string[] }) => {
       if (!serverIdRef.current || p.serverId !== serverIdRef.current) return;
@@ -378,15 +394,7 @@ function MainView({
 
       seenIds.add(msg.id);
 
-      setMessages((prev) => {
-        const key = makeKey(msg);
-
-        const withoutTemps = prev.filter(
-          (m) => !(m.id.startsWith("temp-") && makeKey(m) === key),
-        );
-
-        return mergeUniqueMessages(withoutTemps, [msg]);
-      });
+      setMessages((prev) => appendOrReplaceLiveMessage(prev, msg));
 
       if (shouldStickToBottom) {
         scrollToBottom("smooth");
@@ -407,17 +415,7 @@ function MainView({
       try {
         setAuth(token);
 
-        appendDebug(`BOOT token exists: ${token ? "yes" : "no"}`);
-        appendDebug(`BOOT user: ${user.username} (${user.id})`);
-
         const list = await myServers();
-        appendDebug(`BOOT myServers result length: ${list.length}`);
-        appendDebug(
-          `BOOT myServers names: ${
-            list.map((s) => s.name).join(", ") || "(none)"
-          }`,
-        );
-
         if (cancelled) return;
 
         setServers(list);
@@ -439,11 +437,9 @@ function MainView({
             ? savedServerId
             : list[0].id;
 
-        appendDebug(`BOOT selected server id: ${preferredServerId}`);
         await selectServer(preferredServerId);
       } catch (e) {
         console.error("servers boot failed", e);
-        appendDebug(`servers boot failed: ${String(e)}`);
         setServers([]);
       }
     }
@@ -528,7 +524,6 @@ function MainView({
       );
     } catch (e) {
       console.warn("members/roles fetch failed", e);
-      appendDebug("members/roles fetch failed");
       setMembers([]);
       setRoles([]);
       setMemberRoles({});
@@ -593,22 +588,17 @@ function MainView({
       created_at: new Date().toISOString(),
     };
 
-    setMessages((prev) => mergeUniqueMessages(prev, [optimistic]));
+    setMessages((prev) => appendOptimistic(prev, [optimistic]));
     scrollToBottom("smooth");
 
     try {
       const real = await sendMessage(channelId, content);
       seenIds.add(real.id);
 
-      setMessages((prev) => {
-        const withoutTemp = prev.filter((m) => m.id !== tempId);
-        return mergeUniqueMessages(withoutTemp, [real]);
-      });
-
+      setMessages((prev) => appendOrReplaceLiveMessage(prev, real));
       scrollToBottom("smooth");
     } catch (e) {
       console.error("send failed", e);
-      appendDebug("send failed");
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       setInputVal(content);
     }
@@ -644,7 +634,6 @@ function MainView({
       await selectChannel(ch.id);
     } catch (e) {
       console.error("create server failed", e);
-      appendDebug("create server failed");
     }
   }
 
@@ -661,7 +650,6 @@ function MainView({
         "Only the server owner or members with Manage Channels can create channels.",
       );
       console.warn("create channel failed", e);
-      appendDebug("create channel failed");
     }
   }
 
@@ -676,7 +664,6 @@ function MainView({
       await selectServer(joinedId);
     } catch (e) {
       console.warn("join by code failed", e);
-      appendDebug("join by code failed");
       alert("Invalid or expired invite code.");
     }
   }
@@ -689,7 +676,6 @@ function MainView({
       force((x) => x + 1);
     } catch (e) {
       console.error("join voice failed", e);
-      appendDebug("join voice failed");
     }
   }
 
@@ -701,7 +687,6 @@ function MainView({
       force((x) => x + 1);
     } catch (e) {
       console.error("leave voice failed", e);
-      appendDebug("leave voice failed");
     }
   }
 
@@ -733,18 +718,13 @@ function MainView({
       if (!id) return;
 
       try {
-        const fresh = await listMessages(id, { limit: PAGE_SIZE });
-        const realKeys = new Set(fresh.map((m) => makeKey(m)));
-
-        setMessages((prev) => {
-          const cleanedPrev = prev.filter(
-            (m) => !(m.id.startsWith("temp-") && realKeys.has(makeKey(m))),
-          );
-
-          return mergeUniqueMessages(cleanedPrev, fresh);
-        });
+        const fresh = sortFetchedMessagesAscending(
+          await listMessages(id, { limit: PAGE_SIZE }),
+        );
 
         fresh.forEach((m) => seenIds.add(m.id));
+
+        setMessages((prev) => appendFetchedLatest(prev, fresh));
       } catch {
         console.debug("poll fallback failed");
       }
@@ -873,13 +853,6 @@ function MainView({
           iconBustMap={iconBust}
           tempIconOverride={tempIconOverride}
         />
-
-        <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-white/70 space-y-1">
-          <div>DEBUG PANEL</div>
-          {debugLines.map((line, i) => (
-            <div key={`${line}-${i}`}>{line}</div>
-          ))}
-        </div>
 
         {hasServerSelected ? (
           <main className="flex-1 min-h-0 grid grid-cols-[280px_minmax(0,2fr)_260px] gap-3 sm:gap-4">

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow } from "electron";
 import { autoUpdater } from "electron-updater";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -16,14 +16,14 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   : RENDERER_DIST;
 
 let win: BrowserWindow | null = null;
-let hasShownUpdaterError = false;
+let isQuittingForUpdate = false;
 
 function createWindow() {
   const iconPath = path.join(
     process.env.APP_ROOT!,
     "public",
     "assets",
-    "icon.png",
+    "icon.ico",
   );
 
   win = new BrowserWindow({
@@ -63,76 +63,48 @@ function setupAutoUpdates() {
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.allowPrerelease = false;
 
   autoUpdater.on("checking-for-update", () => {
     console.log("Checking for updates...");
-    void dialog.showMessageBox({
-      type: "info",
-      title: "Updater",
-      message: `Checking for updates...\nCurrent app version: ${app.getVersion()}`,
-    });
   });
 
   autoUpdater.on("update-available", (info) => {
     console.log("Update available:", info.version);
-    void dialog.showMessageBox({
-      type: "info",
-      title: "Updater",
-      message: `Update available: ${info.version}`,
-      detail: `Current version: ${app.getVersion()}\nDownloading in background.`,
-    });
   });
 
   autoUpdater.on("update-not-available", (info) => {
     console.log("No update available:", info.version);
-    void dialog.showMessageBox({
-      type: "info",
-      title: "Updater",
-      message: "No update available.",
-      detail: `Current version: ${app.getVersion()}\nLatest seen version: ${info.version}`,
-    });
   });
 
   autoUpdater.on("download-progress", (progress) => {
     console.log(`Downloading update: ${Math.round(progress.percent)}%`);
   });
 
+  autoUpdater.on("error", (err) => {
+    console.error("Auto update error:", err);
+  });
+
   autoUpdater.on("update-downloaded", (info) => {
     console.log("Update downloaded:", info.version);
 
-    const result = dialog.showMessageBoxSync({
-      type: "info",
-      buttons: ["Restart now", "Later"],
-      defaultId: 0,
-      cancelId: 1,
-      title: "Update ready",
-      message: `Version ${info.version} has been downloaded.`,
-      detail: "Restart the app to apply the update.",
-    });
+    if (isQuittingForUpdate) return;
+    isQuittingForUpdate = true;
 
-    if (result === 0) {
-      autoUpdater.quitAndInstall();
-    }
+    setTimeout(() => {
+      autoUpdater.quitAndInstall(false, true);
+    }, 1200);
   });
 
-  autoUpdater.on("error", (err) => {
-    console.error("Auto update error:", err);
+  void autoUpdater.checkForUpdates();
 
-    if (hasShownUpdaterError) return;
-    hasShownUpdaterError = true;
-
-    void dialog.showMessageBox({
-      type: "error",
-      title: "Updater error",
-      message: "There was a problem checking for updates.",
-      detail: err instanceof Error ? err.message : String(err),
-    });
-  });
-
-  setTimeout(() => {
-    void autoUpdater.checkForUpdates();
-  }, 3000);
+  setInterval(
+    () => {
+      void autoUpdater.checkForUpdates().catch((err) => {
+        console.error("Periodic update check failed:", err);
+      });
+    },
+    1000 * 60 * 15,
+  );
 }
 
 app.whenReady().then(() => {
