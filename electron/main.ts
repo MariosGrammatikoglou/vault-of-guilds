@@ -20,12 +20,10 @@ let hasShownUpdaterError = false;
 let isInstallingUpdate = false;
 
 function createWindow() {
-  const pngIconPath = path.join(
-    process.env.APP_ROOT!,
-    "public",
-    "assets",
-    "icon.png",
-  );
+  const winIconPath =
+    process.platform === "win32"
+      ? path.join(process.env.APP_ROOT!, "public", "assets", "icon.ico")
+      : path.join(process.env.APP_ROOT!, "public", "assets", "icon.png");
 
   win = new BrowserWindow({
     width: 1200,
@@ -36,7 +34,7 @@ function createWindow() {
     title: "Vault of Guilds",
     titleBarStyle: "hiddenInset",
     autoHideMenuBar: true,
-    icon: pngIconPath,
+    icon: winIconPath,
     webPreferences: {
       preload: path.join(__dirname, "preload.mjs"),
     },
