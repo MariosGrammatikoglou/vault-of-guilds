@@ -19,7 +19,7 @@
         arch: ["x64"],
       },
     ],
-    icon: "public/assets/icon.ico",
+    icon: "public/assets/icon.png",
     artifactName: "Vault-of-Guilds-Windows-${version}-Setup.${ext}",
   },
 

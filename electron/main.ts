@@ -22,8 +22,8 @@ let isInstallingUpdate = false;
 function createWindow() {
   const winIconPath =
     process.platform === "win32"
-      ? path.join(process.env.APP_ROOT!, "public", "assets", "icon.ico")
-      : path.join(process.env.APP_ROOT!, "public", "assets", "icon.png");
+      ? path.join(process.env.APP_ROOT!, "public", "assets", "icon.png")
+      : path.join(process.env.APP_ROOT!, "public", "assets", "icon.ico");
 
   win = new BrowserWindow({
     width: 1200,
