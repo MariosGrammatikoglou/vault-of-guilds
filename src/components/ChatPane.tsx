@@ -161,7 +161,7 @@ export default function ChatPane({
             className={`${inputClass} flex-1 rounded-full border border-white/10 bg-[#151a27] hover:bg-[#1a2030] focus:bg-[#1a2030] text-white/78 placeholder:text-white/34`}
             placeholder={
               channelId
-                ? "type a message..."
+                ? "type a message ..."
                 : "select a channel to start chatting"
             }
             value={input}
