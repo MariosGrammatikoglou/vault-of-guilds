@@ -14,6 +14,8 @@ type Props = {
   onOpenUserSettings: () => void;
   onOpenInfo: () => void;
   onLogout: () => void;
+  onOpenDmInbox: () => void;
+  dmUnread?: number;
   iconBustMap?: Record<string, number>;
   tempIconOverride?: Record<string, string>;
 };
@@ -92,6 +94,25 @@ function JoinSvg({ className = "w-[26px] h-[26px]" }: SvgIconProps) {
     >
       <path
         d="M18.6357 15.6701L20.3521 10.5208C21.8516 6.02242 22.6013 3.77322 21.414 2.58595C20.2268 1.39869 17.9776 2.14842 13.4792 3.64788L8.32987 5.36432C4.69923 6.57453 2.88392 7.17964 2.36806 8.06698C1.87731 8.91112 1.87731 9.95369 2.36806 10.7978C2.88392 11.6852 4.69923 12.2903 8.32987 13.5005C8.77981 13.6505 9.28601 13.5434 9.62294 13.2096L15.1286 7.75495C15.4383 7.44808 15.9382 7.45041 16.245 7.76015C16.5519 8.06989 16.5496 8.56975 16.2398 8.87662L10.8231 14.2432C10.4518 14.6111 10.3342 15.1742 10.4995 15.6701C11.7097 19.3007 12.3148 21.1161 13.2022 21.6319C14.0463 22.1227 15.0889 22.1227 15.933 21.6319C16.8204 21.1161 17.4255 19.3008 18.6357 15.6701Z"
+        fill="#596a91"
+      />
+    </svg>
+  );
+}
+
+function DmSvg({ className = "w-[26px] h-[26px]" }: SvgIconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      className={`${className} pointer-events-none select-none`}
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M12 2C6.477 2 2 6.477 2 12c0 1.89.524 3.66 1.438 5.167L2.05 20.95a.75.75 0 00.997.997l3.783-1.388A9.956 9.956 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zM8 11a1 1 0 100 2 1 1 0 000-2zm4 0a1 1 0 100 2 1 1 0 000-2zm4 0a1 1 0 100 2 1 1 0 000-2z"
         fill="#596a91"
       />
     </svg>
@@ -197,6 +218,8 @@ export default function ServerRail({
   onOpenUserSettings,
   onOpenInfo,
   onLogout,
+  onOpenDmInbox,
+  dmUnread = 0,
   iconBustMap = {},
   tempIconOverride = {},
 }: Props) {
@@ -268,9 +291,16 @@ export default function ServerRail({
         <div
           className={`${glass} ${panelRound} flex-[1.4] flex items-center justify-center gap-2 px-3 py-2 sm:py-2.5 min-w-0`}
         >
-          <IconWrap title="Coming Soon">
-            <ComingSoonSvg />
-          </IconWrap>
+          <div className="relative">
+            <IconWrap title="Direct Messages" onClick={onOpenDmInbox}>
+              <DmSvg />
+            </IconWrap>
+            {dmUnread > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center pointer-events-none leading-none">
+                {dmUnread > 9 ? "9+" : dmUnread}
+              </span>
+            )}
+          </div>
 
           <IconWrap title="Coming Soon">
             <ComingSoonSvg />

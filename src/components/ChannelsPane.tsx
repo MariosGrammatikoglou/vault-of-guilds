@@ -4,6 +4,16 @@ import type { VoiceParticipant } from "../lib/voice";
 import { glass, cuteScroll, panelRound } from "../ui";
 import { getSocket } from "../lib/socket";
 
+// Discord-style screen share / live stream icon
+function StreamIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4" aria-hidden="true">
+      <path d="M2 4.5A2.5 2.5 0 0 1 4.5 2h15A2.5 2.5 0 0 1 22 4.5v11a2.5 2.5 0 0 1-2.5 2.5H14v1.5h2a.75.75 0 0 1 0 1.5H8a.75.75 0 0 1 0-1.5h2V18H4.5A2.5 2.5 0 0 1 2 15.5v-11ZM4.5 3.5A1 1 0 0 0 3.5 4.5v11a1 1 0 0 0 1 1h15a1 1 0 0 0 1-1v-11a1 1 0 0 0-1-1h-15Z" />
+      <path d="M10 8.25a.75.75 0 0 0-1.2-.6l-3 2.25a.75.75 0 0 0 0 1.2l3 2.25A.75.75 0 0 0 10 12.75v-4.5ZM14 8.25a.75.75 0 0 1 1.2-.6l3 2.25a.75.75 0 0 1 0 1.2l-3 2.25A.75.75 0 0 1 14 12.75v-4.5Z" />
+    </svg>
+  );
+}
+
 type Props = {
   serverId: string | null;
   channels: Channel[];
@@ -37,6 +47,12 @@ type Props = {
 
   currentUserId: string;
   canDisconnectVoiceMembers: boolean;
+
+  isSharing?: boolean;
+  onStartShare?: () => void;
+  onStopShare?: () => void;
+  sharingSocketIds?: Set<string>;
+  onWatchStream?: (socketId: string) => void;
 };
 
 function internalToUi(value: number) {
@@ -83,6 +99,11 @@ export default function ChannelsPane({
   pushToTalkLabel,
   currentUserId,
   canDisconnectVoiceMembers,
+  isSharing = false,
+  onStartShare,
+  onStopShare,
+  sharingSocketIds = new Set(),
+  onWatchStream,
 }: Props) {
   const text = channels.filter((c) => c.type === "text");
   const voice = channels.filter((c) => c.type === "voice");
@@ -269,21 +290,33 @@ export default function ChannelsPane({
                       {members.length > 0 && (
                         <div className="ml-3 space-y-1">
                           {members.map((m) => (
-                            <button
+                            <div
                               key={m.socketId}
-                              type="button"
-                              onClick={() => setSelectedVoiceMember(m)}
-                              className="w-full text-left pl-3 border-l border-white/10 h-7 flex items-center gap-2 hover:text-white transition-colors"
+                              className="w-full pl-3 border-l border-white/10 h-7 flex items-center gap-1.5"
                             >
-                              <span
-                                className={`inline-block h-2.5 w-2.5 rounded-full shrink-0 ${getDotClass(
-                                  m,
-                                )}`}
-                              />
-                              <span className="text-[12px] leading-5 text-white/75 truncate">
-                                {m.username}
-                              </span>
-                            </button>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedVoiceMember(m)}
+                                className="flex-1 text-left flex items-center gap-2 min-w-0 hover:text-white transition-colors"
+                              >
+                                <span
+                                  className={`inline-block h-2.5 w-2.5 rounded-full shrink-0 ${getDotClass(m)}`}
+                                />
+                                <span className="text-[12px] leading-5 text-white/75 truncate">
+                                  {m.username}
+                                </span>
+                              </button>
+                              {sharingSocketIds.has(m.socketId) && (
+                                <button
+                                  type="button"
+                                  title="Watch stream"
+                                  onClick={() => onWatchStream?.(m.socketId)}
+                                  className="shrink-0 h-5 w-5 flex items-center justify-center rounded hover:bg-white/10 transition-colors text-green-300/80 hover:text-green-200"
+                                >
+                                  <StreamIcon />
+                                </button>
+                              )}
+                            </div>
                           ))}
                         </div>
                       )}
@@ -321,6 +354,23 @@ export default function ChannelsPane({
               >
                 Leave
               </button>
+
+              {(onStartShare || onStopShare) && (
+                <button
+                  type="button"
+                  onClick={isSharing ? onStopShare : onStartShare}
+                  className={`
+                    h-10 w-10 rounded-full border transition-colors text-sm flex items-center justify-center
+                    ${isSharing
+                      ? "border-green-400/40 bg-green-500/15 text-green-200 hover:bg-green-500/25"
+                      : "border-white/10 bg-[#151a27] hover:bg-[#1a2030] text-white/78"
+                    }
+                  `}
+                  title={isSharing ? "Stop sharing" : "Share screen"}
+                >
+                  🖥
+                </button>
+              )}
 
               <button
                 type="button"

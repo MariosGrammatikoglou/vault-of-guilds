@@ -43,6 +43,8 @@ import ServerRail from "./components/ServerRail";
 import ChannelsPane from "./components/ChannelsPane";
 import ChatPane from "./components/ChatPane";
 import MembersPane from "./components/MembersPane";
+import DMView from "./components/DMView";
+import ScreenShareModal from "./components/ScreenShareModal";
 import CreateServerModal from "./components/modals/CreateServerModal";
 import JoinServerModal from "./components/modals/JoinServerModal";
 import CreateChannelModal from "./components/modals/CreateChannelModal";
@@ -65,6 +67,7 @@ const PERMS = {
   SEND_MESSAGES: 1 << 2,
   CONNECT_VOICE: 1 << 3,
   KICK_MEMBERS: 1 << 4,
+  BAN_MEMBERS: 1 << 5,
 } as const;
 
 const makeKey = (m: Pick<Message, "channel_id" | "user_id" | "content">) =>
@@ -206,6 +209,10 @@ function MainView({
   const seenIds = useMemo(() => new Set<string>(), []);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const screenPeersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const sharingUsernamesRef = useRef<Map<string, string>>(new Map());
+  const isDmViewRef = useRef(false);
 
   const serverIdRef = useRef<string | null>(null);
   const channelIdRef = useRef<string | null>(null);
@@ -382,6 +389,60 @@ function MainView({
       );
     });
 
+    s.on("dm:notify", () => {
+      if (!isDmViewRef.current) setDmUnread((n) => n + 1);
+    });
+
+    s.on("screen:start", (p: { socketId: string; username?: string }) => {
+      setSharingSocketIds((prev) => new Set([...prev, p.socketId]));
+      if (p.username) sharingUsernamesRef.current.set(p.socketId, p.username);
+    });
+
+    // Screen share signaling — receive offers from other sharers
+    s.on("screen:offer", async (p: { from: string; sdp: RTCSessionDescriptionInit }) => {
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+      screenPeersRef.current.set(p.from, pc);
+
+      pc.ontrack = (e) => {
+        const stream = e.streams[0] ?? new MediaStream([e.track]);
+        setIncomingScreenStream(stream);
+        setIncomingScreenUser(sharingUsernamesRef.current.get(p.from) ?? p.from);
+      };
+      pc.onicecandidate = (e) => {
+        if (e.candidate) s.emit("screen:candidate", { to: p.from, candidate: e.candidate });
+      };
+
+      await pc.setRemoteDescription(new RTCSessionDescription(p.sdp));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      s.emit("screen:answer", { to: p.from, sdp: answer });
+    });
+
+    s.on("screen:answer", async (p: { from: string; sdp: RTCSessionDescriptionInit }) => {
+      const pc = screenPeersRef.current.get(p.from);
+      if (!pc) return;
+      await pc.setRemoteDescription(new RTCSessionDescription(p.sdp));
+    });
+
+    s.on("screen:candidate", async (p: { from: string; candidate: RTCIceCandidateInit }) => {
+      const pc = screenPeersRef.current.get(p.from);
+      if (!pc || !p.candidate) return;
+      try { await pc.addIceCandidate(new RTCIceCandidate(p.candidate)); } catch { /* ignore */ }
+    });
+
+    s.on("screen:stop", (p?: { socketId?: string }) => {
+      if (p?.socketId) {
+        setSharingSocketIds((prev) => { const n = new Set(prev); n.delete(p.socketId!); return n; });
+        sharingUsernamesRef.current.delete(p.socketId);
+      } else {
+        setSharingSocketIds(new Set());
+        sharingUsernamesRef.current.clear();
+      }
+      setIncomingScreenStream(null);
+      setIncomingScreenUser("");
+      setShowScreenPanel(false);
+    });
+
     s.on("message:new", (raw: RawMessage) => {
       const msg = normalizeMessage(raw);
       if (msg.channel_id !== channelIdRef.current) return;
@@ -404,6 +465,12 @@ function MainView({
     return () => {
       s.off("presence:update");
       s.off("message:new");
+      s.off("dm:notify");
+      s.off("screen:start");
+      s.off("screen:offer");
+      s.off("screen:answer");
+      s.off("screen:candidate");
+      s.off("screen:stop");
       s.disconnect();
     };
   }, [token, seenIds]);
@@ -808,6 +875,22 @@ function MainView({
     Record<string, string>
   >({});
 
+  // DM state
+  const [isDmView, setIsDmView] = useState(false);
+  const [pendingDmUserId, setPendingDmUserId] = useState<string | null>(null);
+  const [dmUnread, setDmUnread] = useState(0);
+
+  // Keep ref in sync for socket listeners
+  useEffect(() => { isDmViewRef.current = isDmView; }, [isDmView]);
+
+  // Screen share state
+  const [showScreenShareModal, setShowScreenShareModal] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const [incomingScreenStream, setIncomingScreenStream] = useState<MediaStream | null>(null);
+  const [incomingScreenUser, setIncomingScreenUser] = useState<string>("");
+  const [showScreenPanel, setShowScreenPanel] = useState(false);
+  const [sharingSocketIds, setSharingSocketIds] = useState<Set<string>>(new Set());
+
   const scheduleBustRetries = (sid: string) => {
     setIconBust((p) => ({ ...p, [sid]: Date.now() }));
     setTimeout(() => setIconBust((p) => ({ ...p, [sid]: Date.now() })), 800);
@@ -836,6 +919,80 @@ function MainView({
     }
   };
 
+  // ── DM ────────────────────────────────────────────────────────────────────
+  function handleOpenDm(userId: string, _username: string) {
+    setPendingDmUserId(userId);
+    setIsDmView(true);
+    setDmUnread(0);
+  }
+
+  // ── Screen sharing ─────────────────────────────────────────────────────────
+  async function handleStartShare(sourceId: string) {
+    if (!voiceChannelId) return;
+    setShowScreenShareModal(false);
+    try {
+      const stream = await (navigator.mediaDevices as any).getUserMedia({
+        audio: false,
+        video: {
+          mandatory: {
+            chromeMediaSource: "desktop",
+            chromeMediaSourceId: sourceId,
+            maxWidth: 1920,
+            maxHeight: 1080,
+            maxFrameRate: 15,
+          },
+        },
+      });
+      screenStreamRef.current = stream;
+      setIsSharing(true);
+
+      const socket = (await import("./lib/socket")).getSocket();
+      socket.emit("screen:start", { channelId: voiceChannelId });
+
+      // Send screen to existing voice peers
+      const voicePeers = voice.peerIds;
+      for (const peerId of voicePeers) {
+        const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+        screenPeersRef.current.set(peerId, pc);
+
+        stream.getVideoTracks().forEach((t: MediaStreamTrack) => pc.addTrack(t, stream));
+
+        pc.onicecandidate = (e) => {
+          if (e.candidate) socket.emit("screen:candidate", { to: peerId, candidate: e.candidate });
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit("screen:offer", { to: peerId, sdp: offer });
+      }
+
+      stream.getVideoTracks()[0].addEventListener("ended", () => void handleStopShare());
+    } catch (e) {
+      console.error("screen share failed", e);
+      setIsSharing(false);
+    }
+  }
+
+  async function handleStopShare() {
+    if (!voiceChannelId) return;
+    setIsSharing(false);
+
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      screenStreamRef.current = null;
+    }
+
+    screenPeersRef.current.forEach((pc) => pc.close());
+    screenPeersRef.current.clear();
+
+    try {
+      const socket = (await import("./lib/socket")).getSocket();
+      socket.emit("screen:stop", { channelId: voiceChannelId });
+    } catch {
+      // ignore
+    }
+  }
+
   const hasServerSelected = !!serverId;
 
   return (
@@ -849,12 +1006,23 @@ function MainView({
           onOpenJoinServer={() => setOpenJoinServer(true)}
           onOpenUserSettings={() => setOpenUserSettings(true)}
           onOpenInfo={() => setOpenInfo(true)}
+          onOpenDmInbox={() => { setPendingDmUserId(null); setIsDmView(true); setDmUnread(0); }}
+          dmUnread={dmUnread}
           onLogout={onLogout}
           iconBustMap={iconBust}
           tempIconOverride={tempIconOverride}
         />
 
-        {hasServerSelected ? (
+        {isDmView ? (
+          <div className="flex-1 min-h-0">
+            <DMView
+              currentUserId={user.id}
+              serverMembers={members.map((m) => ({ id: m.id, username: m.username, online: !!m.online }))}
+              initialUserId={pendingDmUserId}
+              onBack={() => { setIsDmView(false); setPendingDmUserId(null); }}
+            />
+          </div>
+        ) : hasServerSelected ? (
           <main className="flex-1 min-h-0 grid grid-cols-[280px_minmax(0,2fr)_260px] gap-3 sm:gap-4">
             <div className="min-h-0">
               <ChannelsPane
@@ -888,6 +1056,11 @@ function MainView({
                 canDisconnectVoiceMembers={
                   isOwner || (myPermMask & PERMS.KICK_MEMBERS) !== 0
                 }
+                isSharing={isSharing}
+                onStartShare={isInVoice ? () => setShowScreenShareModal(true) : undefined}
+                onStopShare={isInVoice ? () => void handleStopShare() : undefined}
+                sharingSocketIds={sharingSocketIds}
+                onWatchStream={() => setShowScreenPanel(true)}
               />
             </div>
 
@@ -922,7 +1095,11 @@ function MainView({
                 canKickMembers={
                   isOwner || (myPermMask & PERMS.KICK_MEMBERS) !== 0
                 }
+                canBanMembers={
+                  isOwner || (myPermMask & PERMS.BAN_MEMBERS) !== 0
+                }
                 currentUserId={user.id}
+                onOpenDm={handleOpenDm}
               />
             </div>
           </main>
@@ -992,6 +1169,126 @@ function MainView({
           void handleCreateChannel(t, name);
         }}
       />
+
+      {showScreenShareModal && (
+        <ScreenShareModal
+          onSelect={(sourceId) => void handleStartShare(sourceId)}
+          onClose={() => setShowScreenShareModal(false)}
+        />
+      )}
+
+      {/* Incoming screen share — shown only when user clicks the stream icon */}
+      {incomingScreenStream && showScreenPanel && (
+        <IncomingScreenPanel
+          stream={incomingScreenStream}
+          sharerLabel={incomingScreenUser}
+          onMinimize={() => setShowScreenPanel(false)}
+          onClose={() => { setIncomingScreenStream(null); setIncomingScreenUser(""); setShowScreenPanel(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function IncomingScreenPanel({
+  stream,
+  sharerLabel,
+  onMinimize,
+  onClose,
+}: {
+  stream: MediaStream;
+  sharerLabel: string;
+  onMinimize: () => void;
+  onClose: () => void;
+}) {
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  const pipVideoRef = React.useRef<HTMLVideoElement>(null);
+  const [pip, setPip] = useState(false);
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.srcObject = stream;
+  }, [stream, pip]);
+
+  useEffect(() => {
+    if (pipVideoRef.current) pipVideoRef.current.srcObject = stream;
+  }, [stream, pip]);
+
+  if (pip) {
+    // Small PiP window at bottom-right
+    return (
+      <div className="fixed bottom-6 right-6 z-[99] w-72 rounded-2xl border border-white/15 bg-[#111626]/95 backdrop-blur-xl shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
+          <span className="text-xs text-white/80 font-medium truncate">
+            📺 {sharerLabel || "Someone"}
+          </span>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setPip(false)}
+              className="h-6 w-6 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-white/60 text-xs leading-none"
+              title="Expand"
+            >
+              ⛶
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="h-6 w-6 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-white/60 text-sm leading-none"
+              title="Stop watching"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+        <video
+          ref={pipVideoRef}
+          autoPlay
+          playsInline
+          muted
+          className="w-full aspect-video bg-black object-contain"
+        />
+      </div>
+    );
+  }
+
+  // Full-screen overlay
+  return (
+    <div className="fixed inset-0 z-[99] bg-black/85 backdrop-blur-sm flex flex-col">
+      {/* Top bar */}
+      <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 bg-[#111626]/90 shrink-0">
+        <span className="text-sm text-white/90 font-semibold">
+          📺 {sharerLabel || "Someone"} is sharing their screen
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPip(true)}
+            className="h-8 px-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-white/70 text-xs transition-colors"
+            title="Minimize to small window"
+          >
+            ⊡ Minimize
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-8 px-3 rounded-xl border border-red-400/20 bg-red-500/10 hover:bg-red-500/20 text-red-200 text-xs transition-colors"
+            title="Stop watching"
+          >
+            ✕ Close
+          </button>
+        </div>
+      </div>
+      {/* Video fills remaining space */}
+      <div className="flex-1 min-h-0 flex items-center justify-center p-4">
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="max-w-full max-h-full rounded-xl shadow-2xl object-contain"
+          style={{ width: "100%", height: "100%" }}
+        />
+      </div>
     </div>
   );
 }

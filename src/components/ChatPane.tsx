@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { Message, Role } from "../lib/api";
 import {
   glass,
@@ -22,6 +22,15 @@ type Props = {
   loadingOlder: boolean;
   hasMoreMessages: boolean;
 };
+
+const EMOJI_LIST = [
+  "😀","😂","😍","🥰","😎","😭","😅","🤔","😱","🥳",
+  "👍","👎","❤️","🔥","✨","🎉","🥺","😤","🤣","😴",
+  "👀","💀","🙌","🤝","💪","🫡","🙏","🤯","😇","👏",
+  "🐶","🐱","🦊","🐸","🦄","🐙","🐧","🦋","🌸","🌟",
+  "🍕","🍔","🍩","🍦","☕","🧋","🎮","🎵","🎬","💡",
+  "🚀","⚡","💥","🌈","🎯","💎","🏆","🎸","🎲","🃏",
+];
 
 function isSameDay(a: Date, b: Date) {
   return (
@@ -69,6 +78,29 @@ export default function ChatPane({
   loadingOlder,
   hasMoreMessages,
 }: Props) {
+  const [showEmoji, setShowEmoji] = useState(false);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const emojiBtnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!showEmoji) return;
+    function handleDown(e: MouseEvent) {
+      if (
+        emojiPickerRef.current?.contains(e.target as Node) ||
+        emojiBtnRef.current?.contains(e.target as Node)
+      )
+        return;
+      setShowEmoji(false);
+    }
+    document.addEventListener("mousedown", handleDown);
+    return () => document.removeEventListener("mousedown", handleDown);
+  }, [showEmoji]);
+
+  function appendEmoji(emoji: string) {
+    setInput(input + emoji);
+    setShowEmoji(false);
+  }
+
   return (
     <section
       className={`${glass} ${panelRound} h-full min-h-0 overflow-hidden grid grid-rows-[auto_1fr_auto]`}
@@ -156,7 +188,39 @@ export default function ChatPane({
       </div>
 
       <div className="px-3 sm:px-4 py-3 border-t border-white/10">
-        <div className="flex gap-2">
+        <div className="flex gap-2 relative">
+          {/* Emoji picker popup */}
+          {showEmoji && (
+            <div
+              ref={emojiPickerRef}
+              className="absolute bottom-full mb-2 left-0 z-30 w-[380px] rounded-2xl border border-white/15 bg-[#111626]/97 backdrop-blur-xl shadow-2xl p-3"
+            >
+              <div className={`grid grid-cols-10 gap-0.5 max-h-[190px] overflow-y-auto overflow-x-hidden ${cuteScroll}`}>
+                {EMOJI_LIST.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    className="text-xl w-8 h-8 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
+                    onClick={() => appendEmoji(emoji)}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <button
+            ref={emojiBtnRef}
+            type="button"
+            onClick={() => setShowEmoji((v) => !v)}
+            disabled={!channelId}
+            className="h-10 w-10 rounded-full border border-white/10 bg-[#151a27] hover:bg-[#1a2030] transition-colors text-lg flex items-center justify-center shrink-0 disabled:opacity-40"
+            title="Emoji"
+          >
+            😊
+          </button>
+
           <input
             className={`${inputClass} flex-1 rounded-full border border-white/10 bg-[#151a27] hover:bg-[#1a2030] focus:bg-[#1a2030] text-white/78 placeholder:text-white/34`}
             placeholder={

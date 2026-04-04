@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, desktopCapturer } from "electron";
 import { autoUpdater } from "electron-updater";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -36,7 +36,7 @@ function createWindow() {
     autoHideMenuBar: true,
     icon: windowIconPath,
     webPreferences: {
-      preload: path.join(__dirname, "preload.mjs"),
+      preload: path.join(__dirname, "preload.js"),
     },
   });
 
@@ -137,6 +137,19 @@ function setupAutoUpdates() {
     void autoUpdater.checkForUpdates();
   }, 3000);
 }
+
+ipcMain.handle("get-screen-sources", async () => {
+  const sources = await desktopCapturer.getSources({
+    types: ["screen", "window"],
+    thumbnailSize: { width: 320, height: 180 },
+  });
+  return sources.map((s) => ({
+    id: s.id,
+    name: s.name,
+    thumbnail: s.thumbnail.toDataURL(),
+    appIcon: s.appIcon ? s.appIcon.toDataURL() : null,
+  }));
+});
 
 app.whenReady().then(() => {
   app.setName("Vault of Guilds");

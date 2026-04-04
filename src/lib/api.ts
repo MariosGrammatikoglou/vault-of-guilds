@@ -288,3 +288,75 @@ export async function updateMyColor(color: string | null) {
   const { data } = await api.patch<UserProfile>("/users/me/color", { color });
   return data;
 }
+
+// ── Ban ──────────────────────────────────────────────────────────────────────
+
+export type BannedUser = {
+  user_id: string;
+  username: string;
+  reason: string | null;
+  created_at: string;
+};
+
+export async function banMember(
+  serverId: string,
+  userId: string,
+  reason?: string,
+) {
+  const { data } = await api.post<{ ok: true }>(
+    `/servers/${serverId}/ban/${userId}`,
+    { reason },
+  );
+  return data;
+}
+
+export async function unbanMember(serverId: string, userId: string) {
+  const { data } = await api.post<{ ok: true }>(
+    `/servers/${serverId}/unban/${userId}`,
+  );
+  return data;
+}
+
+export async function listBans(serverId: string) {
+  const { data } = await api.get<BannedUser[]>(`/servers/${serverId}/bans`);
+  return data;
+}
+
+// ── Direct Messages ───────────────────────────────────────────────────────────
+
+export type DmChannel = {
+  id: string;
+  other_user_id: string;
+  other_username: string;
+  created_at: string;
+};
+
+export type DmMessage = {
+  id: string;
+  dm_channel_id: string;
+  sender_id: string;
+  content: string;
+  created_at: string;
+  sender_username: string;
+};
+
+export async function openDmChannel(targetUserId: string) {
+  const { data } = await api.post<DmChannel>("/dm/open", { targetUserId });
+  return data;
+}
+
+export async function listDmChannels() {
+  const { data } = await api.get<DmChannel[]>("/dm/list");
+  return data;
+}
+
+export async function listDmMessages(
+  channelId: string,
+  limit = 30,
+  before?: string,
+) {
+  const { data } = await api.get<DmMessage[]>("/dm/messages", {
+    params: { channelId, limit, before },
+  });
+  return data;
+}

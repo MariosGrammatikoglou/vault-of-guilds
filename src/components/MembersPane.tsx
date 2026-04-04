@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { glass, panelRound, cuteScroll, chip } from "../ui";
-import { kickMember as kickMemberApi } from "../lib/api";
+import { kickMember as kickMemberApi, banMember as banMemberApi } from "../lib/api";
 
 type Member = {
   id: string;
@@ -21,7 +21,9 @@ type Props = {
   members: Member[];
   memberRoles: Record<string, Role[]>;
   canKickMembers?: boolean;
+  canBanMembers?: boolean;
   currentUserId: string;
+  onOpenDm?: (userId: string, username: string) => void;
 };
 
 export default function MembersPane({
@@ -29,13 +31,17 @@ export default function MembersPane({
   members,
   memberRoles,
   canKickMembers = false,
+  canBanMembers = false,
   currentUserId,
+  onOpenDm,
 }: Props) {
   const online = members.filter((m) => m.online);
   const offline = members.filter((m) => !m.online);
 
   const [kickTarget, setKickTarget] = useState<Member | null>(null);
   const [kickBusy, setKickBusy] = useState(false);
+  const [banTarget, setBanTarget] = useState<Member | null>(null);
+  const [banBusy, setBanBusy] = useState(false);
 
   async function handleKick(target: Member) {
     if (!serverId) return;
@@ -49,6 +55,21 @@ export default function MembersPane({
       alert("Could not kick user from server.");
     } finally {
       setKickBusy(false);
+    }
+  }
+
+  async function handleBan(target: Member) {
+    if (!serverId) return;
+    setBanBusy(true);
+    try {
+      await banMemberApi(serverId, target.id);
+      setBanTarget(null);
+      window.location.reload();
+    } catch (err) {
+      console.error("ban member failed", err);
+      alert("Could not ban user from server.");
+    } finally {
+      setBanBusy(false);
     }
   }
 
@@ -67,16 +88,16 @@ export default function MembersPane({
           <Section label={`ONLINE — ${online.length}`}>
             <ul className="space-y-1">
               {online.map((m) => (
-                <li
-                  key={m.id}
-                  className="px-2 py-1 rounded-lg hover:bg-[#151827]"
-                >
+                <li key={m.id} className="px-2 py-1 rounded-lg hover:bg-[#151827]">
                   <MemberRow
                     m={m}
                     roles={memberRoles[m.id] ?? []}
                     canKick={canKickMembers}
+                    canBan={canBanMembers}
                     isSelf={m.id === currentUserId}
                     onKickRequest={() => setKickTarget(m)}
+                    onBanRequest={() => setBanTarget(m)}
+                    onDmRequest={onOpenDm ? () => onOpenDm(m.id, m.username) : undefined}
                   />
                 </li>
               ))}
@@ -86,16 +107,16 @@ export default function MembersPane({
           <Section label={`OFFLINE — ${offline.length}`}>
             <ul className="space-y-1 opacity-80">
               {offline.map((m) => (
-                <li
-                  key={m.id}
-                  className="px-2 py-1 rounded-lg hover:bg-[#151827]"
-                >
+                <li key={m.id} className="px-2 py-1 rounded-lg hover:bg-[#151827]">
                   <MemberRow
                     m={m}
                     roles={memberRoles[m.id] ?? []}
                     canKick={canKickMembers}
+                    canBan={canBanMembers}
                     isSelf={m.id === currentUserId}
                     onKickRequest={() => setKickTarget(m)}
+                    onBanRequest={() => setBanTarget(m)}
+                    onDmRequest={onOpenDm ? () => onOpenDm(m.id, m.username) : undefined}
                   />
                 </li>
               ))}
@@ -110,23 +131,26 @@ export default function MembersPane({
           description={`Remove ${kickTarget.username} from this server. They will need a new invite to come back.`}
           confirmText={kickBusy ? "Kicking..." : "Kick User"}
           confirmClassName="bg-red-500/20 text-red-200 border border-red-300/20 hover:bg-red-500/30"
-          onCancel={() => {
-            if (!kickBusy) setKickTarget(null);
-          }}
+          onCancel={() => { if (!kickBusy) setKickTarget(null); }}
           onConfirm={() => void handleKick(kickTarget)}
+        />
+      )}
+
+      {banTarget && (
+        <ConfirmModal
+          title="Ban user from server?"
+          description={`Permanently ban ${banTarget.username}. They won't be able to rejoin with an invite.`}
+          confirmText={banBusy ? "Banning..." : "Ban User"}
+          confirmClassName="bg-red-600/25 text-red-200 border border-red-400/25 hover:bg-red-600/35"
+          onCancel={() => { if (!banBusy) setBanTarget(null); }}
+          onConfirm={() => void handleBan(banTarget)}
         />
       )}
     </>
   );
 }
 
-function Section({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-2 mb-4">
       <div className="text-xs text-slate-400">{label}</div>
@@ -139,14 +163,20 @@ function MemberRow({
   m,
   roles,
   canKick,
+  canBan,
   isSelf,
   onKickRequest,
+  onBanRequest,
+  onDmRequest,
 }: {
   m: Member;
   roles: Role[];
   canKick: boolean;
+  canBan: boolean;
   isSelf: boolean;
   onKickRequest: () => void;
+  onBanRequest: () => void;
+  onDmRequest?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -157,25 +187,19 @@ function MemberRow({
     if (!open) return;
     function handleDown(e: MouseEvent) {
       if (!containerRef.current) return;
-      if (!containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      if (!containerRef.current.contains(e.target as Node)) setOpen(false);
     }
     document.addEventListener("mousedown", handleDown);
     return () => document.removeEventListener("mousedown", handleDown);
   }, [open]);
 
   return (
-    <div
-      ref={containerRef}
-      className="relative flex items-center justify-between gap-2"
-    >
+    <div ref={containerRef} className="relative flex items-center justify-between gap-2">
       <div className="flex items-center gap-2 min-w-0">
         <span
-          className="w-2 h-2 rounded-full"
+          className="w-2 h-2 rounded-full shrink-0"
           style={{ background: m.online ? "#22c55e" : "#6b7280" }}
         />
-
         <button
           className="truncate text-left no-underline hover:no-underline focus:outline-none opacity-95 hover:opacity-100 transition-opacity"
           style={{ color }}
@@ -192,8 +216,12 @@ function MemberRow({
           username={m.username}
           roles={roles}
           canKick={canKick}
+          canBan={canBan}
           isSelf={isSelf}
           onKickRequest={onKickRequest}
+          onBanRequest={onBanRequest}
+          onDmRequest={onDmRequest}
+          onClose={() => setOpen(false)}
         />
       )}
     </div>
@@ -204,41 +232,40 @@ function UserPopover({
   username,
   roles,
   canKick,
+  canBan,
   isSelf,
   onKickRequest,
+  onBanRequest,
+  onDmRequest,
+  onClose,
 }: {
   username: string;
   roles: Role[];
   canKick: boolean;
+  canBan: boolean;
   isSelf: boolean;
   onKickRequest: () => void;
+  onBanRequest: () => void;
+  onDmRequest?: () => void;
+  onClose: () => void;
 }) {
+  const hasModActions = !isSelf && (canKick || canBan);
+
   return (
     <div className="absolute right-0 top-full mt-1 z-20 min-w-[220px] rounded-xl border border-[#262b3f] bg-[#111626] px-3 py-3 text-xs shadow-[0_18px_30px_rgba(0,0,0,0.6)]">
       <div className="mb-2">
-        <div className="text-[11px] text-slate-400 uppercase tracking-wide">
-          User
-        </div>
-        <div className="text-sm text-slate-50 font-semibold truncate">
-          {username}
-        </div>
+        <div className="text-[11px] text-slate-400 uppercase tracking-wide">User</div>
+        <div className="text-sm text-slate-50 font-semibold truncate">{username}</div>
       </div>
 
-      <div className="mb-1 text-[11px] text-slate-400 uppercase tracking-wide">
-        Roles
-      </div>
-
-      <div className="flex flex-wrap gap-1">
+      <div className="mb-1 text-[11px] text-slate-400 uppercase tracking-wide">Roles</div>
+      <div className="flex flex-wrap gap-1 mb-2">
         {roles.length > 0 ? (
           roles.map((r) => (
             <span
               key={r.id}
               className={chip}
-              style={{
-                borderColor: `${r.color}55`,
-                color: r.color,
-                background: "#151827",
-              }}
+              style={{ borderColor: `${r.color}55`, color: r.color, background: "#151827" }}
             >
               {r.name}
             </span>
@@ -248,15 +275,38 @@ function UserPopover({
         )}
       </div>
 
-      {canKick && !isSelf && (
-        <div className="mt-3 pt-3 border-t border-white/10">
+      {!isSelf && onDmRequest && (
+        <div className="pt-2 border-t border-white/10">
           <button
             type="button"
-            onClick={onKickRequest}
-            className="w-full h-8 rounded-lg bg-red-500/15 text-red-200 border border-red-300/15 hover:bg-red-500/25 transition-colors text-[12px]"
+            onClick={() => { onDmRequest(); onClose(); }}
+            className="w-full h-8 rounded-lg bg-indigo-500/15 text-indigo-200 border border-indigo-300/15 hover:bg-indigo-500/25 transition-colors text-[12px] mb-1"
           >
-            Kick user
+            Chat
           </button>
+        </div>
+      )}
+
+      {hasModActions && (
+        <div className={`${!isSelf && onDmRequest ? "mt-1" : "mt-3 pt-3 border-t border-white/10"} space-y-1`}>
+          {canKick && (
+            <button
+              type="button"
+              onClick={onKickRequest}
+              className="w-full h-8 rounded-lg bg-orange-500/15 text-orange-200 border border-orange-300/15 hover:bg-orange-500/25 transition-colors text-[12px]"
+            >
+              Kick user
+            </button>
+          )}
+          {canBan && (
+            <button
+              type="button"
+              onClick={onBanRequest}
+              className="w-full h-8 rounded-lg bg-red-600/15 text-red-200 border border-red-400/15 hover:bg-red-600/25 transition-colors text-[12px]"
+            >
+              Ban user
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -291,7 +341,6 @@ function ConfirmModal({
           <h3 className="text-base font-semibold text-white">{title}</h3>
           <p className="text-sm text-white/65 leading-6">{description}</p>
         </div>
-
         <div className="mt-5 flex items-center justify-end gap-2">
           <button
             type="button"

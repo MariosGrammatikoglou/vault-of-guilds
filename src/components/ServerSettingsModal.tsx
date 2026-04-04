@@ -11,6 +11,7 @@ const PERMS = {
   SEND_MESSAGES: 1 << 2,
   CONNECT_VOICE: 1 << 3,
   KICK_MEMBERS: 1 << 4,
+  BAN_MEMBERS: 1 << 5,
 } as const;
 
 const PERMISSION_OPTIONS = [
@@ -38,6 +39,11 @@ const PERMISSION_OPTIONS = [
     bit: PERMS.KICK_MEMBERS,
     label: "Kick Members",
     hint: "Kick from server or disconnect from voice",
+  },
+  {
+    bit: PERMS.BAN_MEMBERS,
+    label: "Ban Members",
+    hint: "Permanently ban users from the server",
   },
 ] as const;
 
