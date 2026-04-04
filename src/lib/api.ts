@@ -3,6 +3,20 @@ import { CONFIG } from "./config";
 
 export const api = axios.create({ baseURL: CONFIG.API_BASE });
 
+// Auto-logout when token is expired or invalid
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err?.response?.status === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      localStorage.removeItem("selectedServerId");
+      location.reload();
+    }
+    return Promise.reject(err);
+  },
+);
+
 export function setAuth(token: string | null) {
   if (token) api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
   else delete api.defaults.headers.common["Authorization"];

@@ -121,27 +121,39 @@ function appendFetchedLatest(existing: Message[], fetched: Message[]) {
   return next;
 }
 
-export default function App() {
-  const [token, setToken] = useState<string | null>(() =>
-    localStorage.getItem("token"),
-  );
-  const [user, setUser] = useState<User | null>(() => {
-    const u = localStorage.getItem("user");
-    return u ? (JSON.parse(u) as User) : null;
-  });
+function readStoredAuth(): { token: string; user: User } | null {
+  try {
+    const token =
+      localStorage.getItem("token") || sessionStorage.getItem("token");
+    const userRaw =
+      localStorage.getItem("user") || sessionStorage.getItem("user");
+    if (token && userRaw) return { token, user: JSON.parse(userRaw) as User };
+  } catch {}
+  return null;
+}
 
-  const handleUserUpdate = (u: User) => {
-    setUser(u);
-    localStorage.setItem("user", JSON.stringify(u));
-  };
+function clearStoredAuth() {
+  localStorage.removeItem("token");
+  localStorage.removeItem("user");
+  localStorage.removeItem(SELECTED_SERVER_STORAGE_KEY);
+  sessionStorage.removeItem("token");
+  sessionStorage.removeItem("user");
+}
+
+export default function App() {
+  const stored = readStoredAuth();
+  const [token, setToken] = useState<string | null>(stored?.token ?? null);
+  const [user, setUser] = useState<User | null>(stored?.user ?? null);
 
   if (!token || !user) {
     return (
       <AuthView
-        onAuth={(t, u) => {
+        onAuth={(t, u, rememberMe) => {
+          const store = rememberMe ? localStorage : sessionStorage;
+          store.setItem("token", t);
+          store.setItem("user", JSON.stringify(u));
           setToken(t);
-          handleUserUpdate(u);
-          localStorage.setItem("token", t);
+          setUser(u);
         }}
       />
     );
@@ -152,9 +164,7 @@ export default function App() {
       token={token}
       user={user}
       onLogout={() => {
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
-        localStorage.removeItem(SELECTED_SERVER_STORAGE_KEY);
+        clearStoredAuth();
         location.reload();
       }}
     />
@@ -170,6 +180,8 @@ function MainView({
   user: User;
   onLogout: () => void;
 }) {
+  const [bootError, setBootError] = useState(false);
+  const [booting, setBooting] = useState(true);
   const [servers, setServers] = useState<ServerItem[]>([]);
   const [serverId, setServerId] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -479,6 +491,8 @@ function MainView({
     let cancelled = false;
 
     async function boot() {
+      setBooting(true);
+      setBootError(false);
       try {
         setAuth(token);
 
@@ -486,6 +500,7 @@ function MainView({
         if (cancelled) return;
 
         setServers(list);
+        setBooting(false);
 
         if (list.length === 0) {
           setServerId(null);
@@ -498,7 +513,9 @@ function MainView({
           return;
         }
 
-        const savedServerId = localStorage.getItem(SELECTED_SERVER_STORAGE_KEY);
+        const savedServerId =
+          localStorage.getItem(SELECTED_SERVER_STORAGE_KEY) ||
+          sessionStorage.getItem(SELECTED_SERVER_STORAGE_KEY);
         const preferredServerId =
           savedServerId && list.some((s) => s.id === savedServerId)
             ? savedServerId
@@ -506,8 +523,11 @@ function MainView({
 
         await selectServer(preferredServerId);
       } catch (e) {
+        if (cancelled) return;
         console.error("servers boot failed", e);
         setServers([]);
+        setBooting(false);
+        setBootError(true);
       }
     }
 
@@ -930,6 +950,9 @@ function MainView({
   async function handleStartShare(sourceId: string) {
     if (!voiceChannelId) return;
     setShowScreenShareModal(false);
+
+    const socket = (await import("./lib/socket")).getSocket();
+
     try {
       const stream = await (navigator.mediaDevices as any).getUserMedia({
         audio: false,
@@ -943,16 +966,22 @@ function MainView({
           },
         },
       });
+
       screenStreamRef.current = stream;
       setIsSharing(true);
 
-      const socket = (await import("./lib/socket")).getSocket();
+      // Notify everyone first so icon appears immediately
       socket.emit("screen:start", { channelId: voiceChannelId });
 
-      // Send screen to existing voice peers
+      // Send WebRTC stream to users already in voice
       const voicePeers = voice.peerIds;
       for (const peerId of voicePeers) {
-        const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+        const pc = new RTCPeerConnection({
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun1.l.google.com:19302" },
+          ],
+        });
         screenPeersRef.current.set(peerId, pc);
 
         stream.getVideoTracks().forEach((t: MediaStreamTrack) => pc.addTrack(t, stream));
@@ -967,9 +996,10 @@ function MainView({
       }
 
       stream.getVideoTracks()[0].addEventListener("ended", () => void handleStopShare());
-    } catch (e) {
+    } catch (e: any) {
       console.error("screen share failed", e);
       setIsSharing(false);
+      alert(`Screen share failed: ${e?.message ?? "unknown error"}.\nMake sure you are in a voice channel and accepted the screen capture prompt.`);
     }
   }
 
@@ -995,13 +1025,54 @@ function MainView({
 
   const hasServerSelected = !!serverId;
 
+  if (bootError) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center gap-4 bg-[#070b18] text-white">
+        <p className="text-white/60 text-sm">Could not connect to server.</p>
+        <button
+          onClick={() => {
+            setBootError(false);
+            setBooting(true);
+            setAuth(token);
+            myServers()
+              .then(async (list) => {
+                setServers(list);
+                setBooting(false);
+                if (list.length === 0) return;
+                const savedServerId =
+                  localStorage.getItem(SELECTED_SERVER_STORAGE_KEY) ||
+                  sessionStorage.getItem(SELECTED_SERVER_STORAGE_KEY);
+                const preferredServerId =
+                  savedServerId && list.some((s) => s.id === savedServerId)
+                    ? savedServerId
+                    : list[0].id;
+                await selectServer(preferredServerId);
+              })
+              .catch(() => { setBooting(false); setBootError(true); });
+          }}
+          className="px-5 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-sm font-medium transition-colors"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (booting) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-[#070b18]">
+        <div className="w-8 h-8 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen w-screen overflow-hidden bg-gradient-to-br from-[#474e64] via-[#2d3b56] to-[#141626] text-white p-3 sm:p-4">
       <div className="h-full w-full flex flex-col gap-3 sm:gap-4">
         <ServerRail
           servers={servers}
           serverId={serverId}
-          onSelectServer={selectServer}
+          onSelectServer={(id) => { setIsDmView(false); setPendingDmUserId(null); return selectServer(id); }}
           onOpenCreateServer={() => setOpenCreateServer(true)}
           onOpenJoinServer={() => setOpenJoinServer(true)}
           onOpenUserSettings={() => setOpenUserSettings(true)}

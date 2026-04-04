@@ -43,6 +43,7 @@ export default function DMView({
   const [activeChannel, setActiveChannel] = useState<DmChannel | null>(null);
   const [search, setSearch] = useState("");
   const [loadingChannels, setLoadingChannels] = useState(true);
+  const [openingUserId, setOpeningUserId] = useState<string | null>(null);
 
   // Load existing DM channels on mount
   useEffect(() => {
@@ -54,27 +55,23 @@ export default function DMView({
       .catch(() => setLoadingChannels(false));
   }, []);
 
-  // Open initial user's DM if provided
+  // Open initial user's DM immediately — don't wait for channel list
   useEffect(() => {
-    if (!initialUserId || loadingChannels) return;
-
-    const existing = dmChannels.find(
-      (ch) => ch.other_user_id === initialUserId,
-    );
-    if (existing) {
-      setActiveChannel(existing);
-    } else {
-      openDmChannel(initialUserId)
-        .then((ch) => {
-          setDmChannels((prev) =>
-            prev.some((c) => c.id === ch.id) ? prev : [ch, ...prev],
-          );
-          setActiveChannel(ch);
-        })
-        .catch(console.error);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialUserId, loadingChannels]);
+    if (!initialUserId) return;
+    setOpeningUserId(initialUserId);
+    openDmChannel(initialUserId)
+      .then((ch) => {
+        setDmChannels((prev) =>
+          prev.some((c) => c.id === ch.id) ? prev : [ch, ...prev],
+        );
+        setActiveChannel(ch);
+      })
+      .catch((e: any) => {
+        console.error("open dm failed", e);
+        alert(`Could not open chat: ${e?.response?.data?.message ?? e?.message ?? "server error"}`);
+      })
+      .finally(() => setOpeningUserId(null));
+  }, [initialUserId]);
 
   async function handleSelectMember(member: ServerMember) {
     const existing = dmChannels.find((ch) => ch.other_user_id === member.id);
@@ -82,14 +79,18 @@ export default function DMView({
       setActiveChannel(existing);
       return;
     }
+    setOpeningUserId(member.id);
     try {
       const ch = await openDmChannel(member.id);
       setDmChannels((prev) =>
         prev.some((c) => c.id === ch.id) ? prev : [ch, ...prev],
       );
       setActiveChannel(ch);
-    } catch (e) {
+    } catch (e: any) {
       console.error("open dm failed", e);
+      alert(`Could not open chat: ${e?.response?.data?.message ?? e?.message ?? "server error"}`);
+    } finally {
+      setOpeningUserId(null);
     }
   }
 
@@ -136,10 +137,10 @@ export default function DMView({
           />
         </div>
 
-        <div className={`flex-1 min-h-0 overflow-y-auto ${cuteScroll} px-2 pb-3 space-y-4`}>
+        <div className={`flex-1 min-h-0 overflow-y-auto ${cuteScroll} px-2 pb-3`}>
           {/* Existing DM conversations */}
           {filteredChannels.length > 0 && (
-            <div>
+            <div className="mb-1">
               <div className="px-2 py-1 text-[11px] uppercase tracking-wide text-white/40">
                 Direct Messages
               </div>
@@ -168,6 +169,11 @@ export default function DMView({
             </div>
           )}
 
+          {/* Separator */}
+          {filteredChannels.length > 0 && recommendations.length > 0 && (
+            <div className="mx-2 my-2 h-px bg-white/8" />
+          )}
+
           {/* Recommendations from server */}
           {recommendations.length > 0 && (
             <div>
@@ -180,7 +186,8 @@ export default function DMView({
                     <button
                       type="button"
                       onClick={() => void handleSelectMember(m)}
-                      className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-white/6 transition-colors text-left"
+                      disabled={openingUserId === m.id}
+                      className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-white/6 transition-colors text-left disabled:opacity-60"
                     >
                       <div className="relative shrink-0">
                         <div className="w-8 h-8 rounded-full bg-slate-600/40 border border-white/10 flex items-center justify-center text-white/60 font-semibold text-sm">
@@ -229,7 +236,7 @@ export default function DMView({
             <div className="text-center space-y-2">
               <div className="text-4xl">💬</div>
               <div className="text-white/50 text-sm">
-                Select someone to start chatting
+                {openingUserId ? "Opening conversation..." : "Select someone to start chatting"}
               </div>
             </div>
           </div>

@@ -4,7 +4,6 @@ import type { VoiceParticipant } from "../lib/voice";
 import { glass, cuteScroll, panelRound } from "../ui";
 import { getSocket } from "../lib/socket";
 
-// Discord-style screen share / live stream icon
 function StreamIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4" aria-hidden="true">
