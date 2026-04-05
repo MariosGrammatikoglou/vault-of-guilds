@@ -190,12 +190,14 @@ export class VoiceManager {
         .webkitAudioContext
     )();
 
+    const inputDeviceId = localStorage.getItem('audioInputDeviceId') || undefined;
     this.rawLocalStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
         channelCount: 1,
+        ...(inputDeviceId ? { deviceId: { exact: inputDeviceId } } : {}),
       },
     });
 
@@ -693,9 +695,23 @@ export class VoiceManager {
       volume: 1,
     };
 
+    // Apply stored output device if available
+    const outputDeviceId = localStorage.getItem('audioOutputDeviceId');
+    if (outputDeviceId && typeof (audio as any).setSinkId === 'function') {
+      (audio as any).setSinkId(outputDeviceId).catch(() => {});
+    }
+
     this.peers.set(socketId, info);
     this.onChange();
     return info;
+  }
+
+  setOutputDevice(deviceId: string) {
+    this.peers.forEach(({ audio }) => {
+      if (typeof (audio as any).setSinkId === 'function') {
+        (audio as any).setSinkId(deviceId).catch(() => {});
+      }
+    });
   }
 
   private isTypingTarget(target: EventTarget | null): boolean {

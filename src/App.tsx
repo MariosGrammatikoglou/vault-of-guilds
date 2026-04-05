@@ -1187,6 +1187,7 @@ function MainView({
         open={openUserSettings}
         onClose={() => setOpenUserSettings(false)}
         user={user}
+        voice={voice}
       />
 
       {serverId && (
@@ -1254,7 +1255,7 @@ function MainView({
           stream={incomingScreenStream}
           sharerLabel={incomingScreenUser}
           onMinimize={() => setShowScreenPanel(false)}
-          onClose={() => { setIncomingScreenStream(null); setIncomingScreenUser(""); setShowScreenPanel(false); }}
+          onClose={() => setShowScreenPanel(false)}
         />
       )}
     </div>

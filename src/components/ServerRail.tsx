@@ -188,7 +188,7 @@ function normalizeServerIconUrl(
 
   if (!iconUrl) {
     url = defaultServerIcon;
-  } else if (/^https?:\/\//i.test(iconUrl)) {
+  } else if (/^https?:\/\//i.test(iconUrl) || iconUrl.startsWith('data:')) {
     url = iconUrl;
   } else {
     const base = CONFIG.API_BASE ?? "";
@@ -201,7 +201,7 @@ function normalizeServerIconUrl(
     }
   }
 
-  if (bust) {
+  if (bust && !url.startsWith('data:')) {
     const sep = url.includes("?") ? "&" : "?";
     return `${url}${sep}v=${bust}`;
   }
