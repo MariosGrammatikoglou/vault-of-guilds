@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   setAuth,
   myServers,
@@ -6,6 +6,8 @@ import {
   listChannels,
   listMessages,
   sendMessage,
+  editMessage,
+  deleteMessage,
   createChannel,
   getInviteCode,
   joinServerByCode,
@@ -21,6 +23,7 @@ import {
   uploadServerIcon,
   type Channel,
   type Message,
+  type Reaction,
   type Member,
   type Role,
   type ServerItem,
@@ -31,6 +34,7 @@ import {
 
 import {
   connectSocket,
+  getSocket,
   subscribeChannel,
   unsubscribeChannel,
 } from "./lib/socket";
@@ -191,7 +195,6 @@ function MainView({
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
-  const [shouldSnapToBottom, setShouldSnapToBottom] = useState(false);
 
   const [members, setMembers] = useState<Member[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -228,6 +231,14 @@ function MainView({
 
   const serverIdRef = useRef<string | null>(null);
   const channelIdRef = useRef<string | null>(null);
+  const subscribedChannelsRef = useRef<Set<string>>(new Set());
+  // Auto-scroll: true = stick to bottom, false = user scrolled up
+  const autoScrollRef = useRef(true);
+  // True while a programmatic smooth scroll to bottom is in flight (↓ Live button)
+  const scrollingToBottomRef = useRef(false);
+  // Typing throttle
+  const isTypingRef = useRef(false);
+  const typingChannelRef = useRef<string | null>(null);
 
   useEffect(() => {
     serverIdRef.current = serverId;
@@ -249,35 +260,23 @@ function MainView({
   const isOwner = currentServer?.owner_id === user.id;
   const canManageRoles = isOwner || (myPermMask & PERMS.MANAGE_ROLES) !== 0;
 
-  function isNearBottom() {
+  // After every messages commit: if auto-scroll is on, pin to bottom instantly.
+  // useLayoutEffect runs before paint so there's no visible flash.
+  useLayoutEffect(() => {
+    if (!autoScrollRef.current) return;
     const el = messagesContainerRef.current;
-    if (!el) return true;
-    return (
-      el.scrollHeight - el.scrollTop - el.clientHeight <
-      BOTTOM_STICK_THRESHOLD_PX
-    );
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages]);
+
+  // Smooth scroll to latest triggered by the ↓ Live button.
+  function handleScrollToLatest() {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    autoScrollRef.current = true;
+    scrollingToBottomRef.current = true;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }
-
-  function scrollToBottom(behavior: ScrollBehavior = "auto") {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        bottomRef.current?.scrollIntoView({ behavior });
-      });
-    });
-  }
-
-  useEffect(() => {
-    if (!shouldSnapToBottom) return;
-    if (loadingMessages) return;
-    if (!channelId) return;
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        bottomRef.current?.scrollIntoView({ behavior: "auto" });
-        setShouldSnapToBottom(false);
-      });
-    });
-  }, [shouldSnapToBottom, loadingMessages, channelId, messages.length]);
 
   async function loadInitialMessages(targetChannelId: string) {
     setLoadingMessages(true);
@@ -291,13 +290,13 @@ function MainView({
 
       if (channelIdRef.current !== targetChannelId) return;
 
+      autoScrollRef.current = true;
       setMessages(msgs);
 
       seenIds.clear();
       msgs.forEach((m) => seenIds.add(m.id));
 
       setHasMoreMessages(msgs.length === PAGE_SIZE);
-      setShouldSnapToBottom(true);
     } catch (e) {
       console.error("initial messages fetch failed", e);
       if (channelIdRef.current === targetChannelId) {
@@ -458,25 +457,73 @@ function MainView({
     s.on("message:new", (raw: RawMessage) => {
       const msg = normalizeMessage(raw);
       if (msg.channel_id !== channelIdRef.current) return;
-
-      const shouldStickToBottom = isNearBottom();
-
-      if (seenIds.has(msg.id)) {
-        return;
-      }
-
+      if (seenIds.has(msg.id)) return;
       seenIds.add(msg.id);
-
       setMessages((prev) => appendOrReplaceLiveMessage(prev, msg));
+      // useLayoutEffect scrolls if autoScrollRef.current is true
+    });
 
-      if (shouldStickToBottom) {
-        scrollToBottom("smooth");
+    s.on("message:edited", (data: { id: string; channel_id: string; content: string; edited_at: string }) => {
+      if (data.channel_id !== channelIdRef.current) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === data.id
+            ? { ...m, content: data.content, edited_at: data.edited_at }
+            : m,
+        ),
+      );
+    });
+
+    s.on("message:deleted", (data: { id: string; channel_id: string }) => {
+      if (data.channel_id !== channelIdRef.current) return;
+      setMessages((prev) => prev.filter((m) => m.id !== data.id));
+    });
+
+    s.on("typing:update", (data: { channelId: string; users: string[] }) => {
+      if (data.channelId !== channelIdRef.current) return;
+      setTypingUsers(data.users.filter((u) => u !== user.username));
+    });
+
+    s.on("reaction:update", (data: { messageId: string; channelId: string; reactions: Array<{ emoji: string; count: number; user_ids: string[] }> }) => {
+      if (data.channelId !== channelIdRef.current) return;
+      const withReacted: Reaction[] = data.reactions.map((r) => ({
+        ...r,
+        reacted: r.user_ids.includes(user.id),
+      }));
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === data.messageId ? { ...m, reactions: withReacted } : m,
+        ),
+      );
+    });
+
+    s.on("mention:notify", (data: { channelId: string; from: string; content: string }) => {
+      setMentionAlert({ from: data.from, content: data.content });
+      // Desktop notification
+      if (Notification.permission === "granted") {
+        new Notification(`${data.from} mentioned you`, {
+          body: data.content.slice(0, 100),
+          silent: false,
+        });
+      } else if (Notification.permission !== "denied") {
+        void Notification.requestPermission().then((perm) => {
+          if (perm === "granted") {
+            new Notification(`${data.from} mentioned you`, {
+              body: data.content.slice(0, 100),
+            });
+          }
+        });
       }
     });
 
     return () => {
       s.off("presence:update");
       s.off("message:new");
+      s.off("message:edited");
+      s.off("message:deleted");
+      s.off("typing:update");
+      s.off("reaction:update");
+      s.off("mention:notify");
       s.off("dm:notify");
       s.off("screen:start");
       s.off("screen:offer");
@@ -621,6 +668,10 @@ function MainView({
     setServerId(id);
     localStorage.setItem(SELECTED_SERVER_STORAGE_KEY, id);
 
+    // Unsubscribe from all channels of the previous server
+    subscribedChannelsRef.current.forEach((chId) => unsubscribeChannel(chId));
+    subscribedChannelsRef.current.clear();
+
     await Promise.all([
       refreshInvite(id),
       refreshMyPerms(id),
@@ -634,9 +685,6 @@ function MainView({
     if (firstText) {
       await selectChannel(firstText.id);
     } else {
-      if (channelIdRef.current) {
-        unsubscribeChannel(channelIdRef.current);
-      }
       setChannelId(null);
       channelIdRef.current = null;
       setMessages([]);
@@ -645,18 +693,50 @@ function MainView({
   }
 
   async function selectChannel(id: string) {
-    if (channelIdRef.current) {
-      unsubscribeChannel(channelIdRef.current);
-    }
+    // Switch socket subscription to only the active channel
+    subscribedChannelsRef.current.forEach((chId) => {
+      if (chId !== id) unsubscribeChannel(chId);
+    });
+    subscribedChannelsRef.current.clear();
+    subscribeChannel(id);
+    subscribedChannelsRef.current.add(id);
 
+    autoScrollRef.current = true;
+    scrollingToBottomRef.current = false;
     setChannelId(id);
     channelIdRef.current = id;
     setMessages([]);
     setHasMoreMessages(true);
-    setShouldSnapToBottom(false);
-    subscribeChannel(id);
+    setTypingUsers([]);
 
     await loadInitialMessages(id);
+  }
+
+  function handleInputChange(val: string) {
+    setInputVal(val);
+    if (!channelId) return;
+    const s = getSocket();
+    if (val.trim()) {
+      // Only emit typing:start on the first keystroke of a session
+      if (!isTypingRef.current || typingChannelRef.current !== channelId) {
+        s.emit("typing:start", { channelId });
+        isTypingRef.current = true;
+        typingChannelRef.current = channelId;
+      }
+      // Reset the auto-stop timer
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = setTimeout(() => {
+        s.emit("typing:stop", { channelId: typingChannelRef.current });
+        isTypingRef.current = false;
+      }, 3000);
+    } else {
+      // Input cleared — stop immediately
+      if (isTypingRef.current) {
+        s.emit("typing:stop", { channelId });
+        isTypingRef.current = false;
+      }
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    }
   }
 
   async function send() {
@@ -664,6 +744,11 @@ function MainView({
 
     const content = inputVal.trim();
     setInputVal("");
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    if (isTypingRef.current) {
+      getSocket().emit("typing:stop", { channelId });
+      isTypingRef.current = false;
+    }
 
     const tempId = `temp-${Date.now()}`;
     const optimistic: Message = {
@@ -675,15 +760,14 @@ function MainView({
       created_at: new Date().toISOString(),
     };
 
+    autoScrollRef.current = true;
     setMessages((prev) => appendOptimistic(prev, [optimistic]));
-    scrollToBottom("smooth");
+    // useLayoutEffect scrolls after commit
 
     try {
       const real = await sendMessage(channelId, content);
       seenIds.add(real.id);
-
       setMessages((prev) => appendOrReplaceLiveMessage(prev, real));
-      scrollToBottom("smooth");
     } catch (e) {
       console.error("send failed", e);
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
@@ -693,9 +777,21 @@ function MainView({
 
   function handleMessagesScroll() {
     const el = messagesContainerRef.current;
-    if (!el || loadingOlder || loadingMessages || !hasMoreMessages) return;
+    if (!el) return;
 
-    if (el.scrollTop <= TOP_LOAD_THRESHOLD_PX) {
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+
+    if (scrollingToBottomRef.current) {
+      // Programmatic smooth scroll in flight — wait until we arrive
+      if (distFromBottom < 10) {
+        scrollingToBottomRef.current = false;
+        autoScrollRef.current = true;
+      }
+    } else {
+      autoScrollRef.current = distFromBottom < BOTTOM_STICK_THRESHOLD_PX;
+    }
+
+    if (!loadingOlder && !loadingMessages && hasMoreMessages && el.scrollTop <= TOP_LOAD_THRESHOLD_PX) {
       void loadOlderMessages();
     }
   }
@@ -900,6 +996,14 @@ function MainView({
   const [pendingDmUserId, setPendingDmUserId] = useState<string | null>(null);
   const [dmUnread, setDmUnread] = useState(0);
 
+  // Typing indicators
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+
+  // Mention notifications
+  const [mentionAlert, setMentionAlert] = useState<{ from: string; content: string } | null>(null);
+
   // Keep ref in sync for socket listeners
   useEffect(() => { isDmViewRef.current = isDmView; }, [isDmView]);
 
@@ -938,6 +1042,22 @@ function MainView({
       }, 600);
     }
   };
+
+  async function handleEditMessage(messageId: string, content: string) {
+    const updated = await editMessage(messageId, content);
+    setMessages((prev) =>
+      prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)),
+    );
+  }
+
+  async function handleDeleteMessage(messageId: string) {
+    await deleteMessage(messageId);
+    setMessages((prev) => prev.filter((m) => m.id !== messageId));
+  }
+
+  function handleReactionToggle(messageId: string, emoji: string) {
+    getSocket().emit("reaction:toggle", { messageId, emoji });
+  }
 
   // ── DM ────────────────────────────────────────────────────────────────────
   function handleOpenDm(userId: string, _username: string) {
@@ -1144,7 +1264,7 @@ function MainView({
                 messages={messages}
                 memberRoles={memberRoles}
                 input={inputVal}
-                setInput={setInputVal}
+                setInput={handleInputChange}
                 send={send}
                 bottomRef={bottomRef}
                 messagesContainerRef={messagesContainerRef}
@@ -1152,6 +1272,16 @@ function MainView({
                 channelId={channelId}
                 loadingOlder={loadingOlder || loadingMessages}
                 hasMoreMessages={hasMoreMessages}
+                currentUserId={user.id}
+                currentUsername={user.username}
+                serverMembers={members.map((m) => ({ id: m.id, username: m.username }))}
+                typingUsers={typingUsers}
+                onEditMessage={handleEditMessage}
+                onDeleteMessage={handleDeleteMessage}
+                onReactionToggle={handleReactionToggle}
+                onScrollToLatest={handleScrollToLatest}
+                mentionAlert={mentionAlert}
+                onDismissMentionAlert={() => setMentionAlert(null)}
               />
             </div>
 

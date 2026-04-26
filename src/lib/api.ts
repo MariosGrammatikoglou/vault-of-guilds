@@ -110,14 +110,23 @@ export async function createChannel(
   return data;
 }
 
+export type Reaction = {
+  emoji: string;
+  count: number;
+  user_ids: string[];
+  reacted: boolean;
+};
+
 export type Message = {
   id: string;
   channel_id: string;
   user_id: string;
   content: string;
   created_at: string;
+  edited_at?: string | null;
   username?: string;
   display_color?: string | null;
+  reactions?: Reaction[];
 };
 
 export type RawMessage = Message & {
@@ -128,6 +137,7 @@ export function normalizeMessage(raw: RawMessage): Message {
   return {
     ...raw,
     display_color: raw.display_color ?? raw.user_color ?? null,
+    reactions: raw.reactions ?? [],
   };
 }
 
@@ -295,6 +305,31 @@ export async function uploadServerIcon(serverId: string, file: File) {
   });
 
   if ("server" in data) return data.server;
+  return data;
+}
+
+export async function editMessage(messageId: string, content: string): Promise<Message> {
+  const { data } = await api.patch<RawMessage>(`/messages/${messageId}`, { content });
+  return normalizeMessage(data);
+}
+
+export async function deleteMessage(messageId: string): Promise<{ id: string; channel_id: string }> {
+  const { data } = await api.delete<{ id: string; channel_id: string }>(`/messages/${messageId}`);
+  return data;
+}
+
+export async function addReaction(messageId: string, emoji: string) {
+  const { data } = await api.post<{ messageId: string; channelId: string; reactions: Reaction[] }>(
+    `/messages/${messageId}/reactions`,
+    { emoji },
+  );
+  return data;
+}
+
+export async function removeReaction(messageId: string, emoji: string) {
+  const { data } = await api.delete<{ messageId: string; channelId: string; reactions: Reaction[] }>(
+    `/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`,
+  );
   return data;
 }
 

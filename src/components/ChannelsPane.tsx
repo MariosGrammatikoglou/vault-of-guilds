@@ -249,10 +249,10 @@ export default function ChannelsPane({
                 <li key={c.id}>
                   <button
                     onClick={() => onSelectChannel(c.id)}
-                    className={`${paneButton(channelId === c.id)} text-left flex items-center`}
+                    className={`${paneButton(channelId === c.id)} text-left`}
                     type="button"
                   >
-                    <span className="truncate"># {c.name}</span>
+                    # {c.name}
                   </button>
                 </li>
               ))}
