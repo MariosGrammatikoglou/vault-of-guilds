@@ -1299,6 +1299,7 @@ function MainView({
                 canBanMembers={
                   isOwner || (myPermMask & PERMS.BAN_MEMBERS) !== 0
                 }
+                isOwner={isOwner}
                 currentUserId={user.id}
                 onOpenDm={handleOpenDm}
               />

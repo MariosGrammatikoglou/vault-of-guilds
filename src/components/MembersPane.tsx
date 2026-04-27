@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { glass, panelRound, cuteScroll, chip } from "../ui";
-import { kickMember as kickMemberApi, banMember as banMemberApi } from "../lib/api";
+import { kickMember as kickMemberApi, banMember as banMemberApi, transferOwnership as transferOwnershipApi } from "../lib/api";
 
 type Member = {
   id: string;
@@ -22,6 +22,7 @@ type Props = {
   memberRoles: Record<string, Role[]>;
   canKickMembers?: boolean;
   canBanMembers?: boolean;
+  isOwner?: boolean;
   currentUserId: string;
   onOpenDm?: (userId: string, username: string) => void;
 };
@@ -32,6 +33,7 @@ export default function MembersPane({
   memberRoles,
   canKickMembers = false,
   canBanMembers = false,
+  isOwner = false,
   currentUserId,
   onOpenDm,
 }: Props) {
@@ -42,6 +44,8 @@ export default function MembersPane({
   const [kickBusy, setKickBusy] = useState(false);
   const [banTarget, setBanTarget] = useState<Member | null>(null);
   const [banBusy, setBanBusy] = useState(false);
+  const [transferTarget, setTransferTarget] = useState<Member | null>(null);
+  const [transferBusy, setTransferBusy] = useState(false);
 
   async function handleKick(target: Member) {
     if (!serverId) return;
@@ -73,6 +77,21 @@ export default function MembersPane({
     }
   }
 
+  async function handleTransfer(target: Member) {
+    if (!serverId) return;
+    setTransferBusy(true);
+    try {
+      await transferOwnershipApi(serverId, target.id);
+      setTransferTarget(null);
+      window.location.reload();
+    } catch (err) {
+      console.error("transfer ownership failed", err);
+      alert("Could not transfer ownership.");
+    } finally {
+      setTransferBusy(false);
+    }
+  }
+
   return (
     <>
       <aside
@@ -94,9 +113,11 @@ export default function MembersPane({
                     roles={memberRoles[m.id] ?? []}
                     canKick={canKickMembers}
                     canBan={canBanMembers}
+                    canTransfer={isOwner}
                     isSelf={m.id === currentUserId}
                     onKickRequest={() => setKickTarget(m)}
                     onBanRequest={() => setBanTarget(m)}
+                    onTransferRequest={() => setTransferTarget(m)}
                     onDmRequest={onOpenDm ? () => onOpenDm(m.id, m.username) : undefined}
                   />
                 </li>
@@ -113,9 +134,11 @@ export default function MembersPane({
                     roles={memberRoles[m.id] ?? []}
                     canKick={canKickMembers}
                     canBan={canBanMembers}
+                    canTransfer={isOwner}
                     isSelf={m.id === currentUserId}
                     onKickRequest={() => setKickTarget(m)}
                     onBanRequest={() => setBanTarget(m)}
+                    onTransferRequest={() => setTransferTarget(m)}
                     onDmRequest={onOpenDm ? () => onOpenDm(m.id, m.username) : undefined}
                   />
                 </li>
@@ -146,6 +169,17 @@ export default function MembersPane({
           onConfirm={() => void handleBan(banTarget)}
         />
       )}
+
+      {transferTarget && (
+        <ConfirmModal
+          title="Transfer server ownership?"
+          description={`Pass full ownership to ${transferTarget.username}. You will remain a member but lose owner privileges.`}
+          confirmText={transferBusy ? "Transferring..." : "Transfer Ownership"}
+          confirmClassName="bg-amber-500/20 text-amber-200 border border-amber-300/20 hover:bg-amber-500/30"
+          onCancel={() => { if (!transferBusy) setTransferTarget(null); }}
+          onConfirm={() => void handleTransfer(transferTarget)}
+        />
+      )}
     </>
   );
 }
@@ -164,18 +198,22 @@ function MemberRow({
   roles,
   canKick,
   canBan,
+  canTransfer,
   isSelf,
   onKickRequest,
   onBanRequest,
+  onTransferRequest,
   onDmRequest,
 }: {
   m: Member;
   roles: Role[];
   canKick: boolean;
   canBan: boolean;
+  canTransfer: boolean;
   isSelf: boolean;
   onKickRequest: () => void;
   onBanRequest: () => void;
+  onTransferRequest: () => void;
   onDmRequest?: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -217,9 +255,11 @@ function MemberRow({
           roles={roles}
           canKick={canKick}
           canBan={canBan}
+          canTransfer={canTransfer}
           isSelf={isSelf}
           onKickRequest={onKickRequest}
           onBanRequest={onBanRequest}
+          onTransferRequest={onTransferRequest}
           onDmRequest={onDmRequest}
           onClose={() => setOpen(false)}
         />
@@ -233,9 +273,11 @@ function UserPopover({
   roles,
   canKick,
   canBan,
+  canTransfer,
   isSelf,
   onKickRequest,
   onBanRequest,
+  onTransferRequest,
   onDmRequest,
   onClose,
 }: {
@@ -243,13 +285,15 @@ function UserPopover({
   roles: Role[];
   canKick: boolean;
   canBan: boolean;
+  canTransfer: boolean;
   isSelf: boolean;
   onKickRequest: () => void;
   onBanRequest: () => void;
+  onTransferRequest: () => void;
   onDmRequest?: () => void;
   onClose: () => void;
 }) {
-  const hasModActions = !isSelf && (canKick || canBan);
+  const hasModActions = !isSelf && (canKick || canBan || canTransfer);
 
   return (
     <div className="absolute right-0 top-full mt-1 z-20 min-w-[220px] rounded-xl border border-[#262b3f] bg-[#111626] px-3 py-3 text-xs shadow-[0_18px_30px_rgba(0,0,0,0.6)]">
@@ -305,6 +349,15 @@ function UserPopover({
               className="w-full h-8 rounded-lg bg-red-600/15 text-red-200 border border-red-400/15 hover:bg-red-600/25 transition-colors text-[12px]"
             >
               Ban user
+            </button>
+          )}
+          {canTransfer && (
+            <button
+              type="button"
+              onClick={() => { onTransferRequest(); onClose(); }}
+              className="w-full h-8 rounded-lg bg-amber-500/15 text-amber-200 border border-amber-300/15 hover:bg-amber-500/25 transition-colors text-[12px]"
+            >
+              Transfer Ownership
             </button>
           )}
         </div>
